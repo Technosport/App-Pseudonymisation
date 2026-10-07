@@ -1,0 +1,100 @@
+<!doctype html>
+<html lang="fr">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Pseudonymisation – Participants</title>
+<link rel="stylesheet" href="app.css">
+</head>
+<body>
+
+<section id="login" class="center hidden">
+  <form id="loginForm" class="card" autocomplete="off">
+    <h1>Participants</h1>
+    <p id="loginHelp"></p>
+    <label>Mot de passe <input type="password" id="pw" required autofocus></label>
+    <label id="pw2row" class="hidden">Confirmer le mot de passe <input type="password" id="pw2"></label>
+    <p id="pwWarn" class="warn hidden">Ce mot de passe chiffre toutes les données. S'il est perdu, elles sont <b>irrécupérables</b>. Notez-le dans un endroit sûr.</p>
+    <p id="loginErr" class="error"></p>
+    <button class="primary" id="loginBtn">Ouvrir</button>
+  </form>
+</section>
+
+<section id="app" class="hidden">
+  <header>
+    <h1>Participants <small id="count"></small></h1>
+    <input type="search" id="search" placeholder="Rechercher (nom, prénom, ID, code manip…)">
+    <button class="primary" id="addBtn">+ Nouveau participant</button>
+    <button id="importBtn">Importer</button>
+    <details class="menu"><summary>Exporter</summary>
+      <div>
+        <a href="/api/export?mode=full&format=xlsx">Complet (Excel)</a>
+        <a href="/api/export?mode=full&format=csv">Complet (CSV)</a>
+        <a href="/api/export?mode=pseudo&format=xlsx">Pseudonymisé (Excel)</a>
+        <a href="/api/export?mode=pseudo&format=csv">Pseudonymisé (CSV)</a>
+      </div>
+    </details>
+    <details class="menu"><summary>Plus</summary>
+      <div>
+        <button id="backupBtn">Sauvegarder maintenant</button>
+        <button id="auditBtn">Journal des modifications</button>
+        <button id="pwBtn">Changer le mot de passe</button>
+        <button id="anonBtn">Masquer l'identité : <span id="anonState">non</span></button>
+      </div>
+    </details>
+    <button id="quitBtn">Quitter</button>
+    <input type="file" id="file" accept=".xlsx,.xlsm,.csv" class="hidden">
+  </header>
+  <div id="notice" class="notice hidden"></div>
+  <div class="tablewrap"><table>
+    <thead><tr id="thead"></tr></thead>
+    <tbody id="rows"></tbody>
+  </table></div>
+  <p id="empty" class="muted hidden">Aucun participant.</p>
+</section>
+
+<dialog id="formDlg">
+  <form id="pForm" method="dialog" autocomplete="off">
+    <h2 id="formTitle"></h2>
+    <div class="grid">
+      <label>Nom * <input name="nom" required></label>
+      <label>Prénom * <input name="prenom" required></label>
+      <label>Date de naissance * <input name="dateNaissance" type="date" required></label>
+      <label>Sexe * <select name="sexe" required><option value="">—</option><option>Homme</option><option>Femme</option></select></label>
+      <label>Taille (cm) <input name="taille" inputmode="decimal"></label>
+      <label>Poids (kg) <input name="poids" inputmode="decimal"></label>
+      <label>Numéro de téléphone <input name="telephone" type="tel"></label>
+      <label>E-mail <input name="email" type="email"></label>
+      <label class="wide">Code Manip <input name="codeManip"></label>
+    </div>
+    <p id="formErr" class="error"></p>
+    <div class="actions">
+      <button type="button" id="cancelBtn">Annuler</button>
+      <button class="primary" id="saveBtn">Enregistrer</button>
+    </div>
+  </form>
+</dialog>
+
+<dialog id="pwDlg">
+  <form id="pwForm" method="dialog" autocomplete="off">
+    <h2>Changer le mot de passe</h2>
+    <label>Mot de passe actuel <input type="password" id="oldPw" required></label>
+    <label>Nouveau mot de passe (8 caractères min.) <input type="password" id="newPw" required minlength="8"></label>
+    <p id="pwErr" class="error"></p>
+    <div class="actions">
+      <button type="button" id="pwCancel">Annuler</button>
+      <button class="primary">Changer</button>
+    </div>
+  </form>
+</dialog>
+
+<dialog id="auditDlg">
+  <h2>Journal des modifications</h2>
+  <p class="muted">Seuls l'ID et le type d'action sont enregistrés (aucune donnée personnelle).</p>
+  <div class="scroll"><table><thead><tr><th>Date</th><th>Action</th><th>ID</th><th>Détail</th></tr></thead><tbody id="auditRows"></tbody></table></div>
+  <div class="actions"><button id="auditClose">Fermer</button></div>
+</dialog>
+
+<script src="app.js"></script>
+</body>
+</html>

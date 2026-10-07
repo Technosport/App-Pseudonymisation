@@ -1,0 +1,9 @@
+dist/
+*.pdb
+*.pdb.tmp
+*.xlsx
+*.xlsm
+*.csv
+data/
+backups/
+.instance

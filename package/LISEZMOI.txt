@@ -1,0 +1,49 @@
+PARTICIPANTS – gestion pseudonymisée des participants
+=====================================================
+
+INSTALLATION (une seule fois)
+  1. Branchez la clé USB (format exFAT ou FAT32 : lisible sur PC et Mac).
+  2. Copiez ce dossier « Participants » à la racine de la clé.
+  Rien d'autre à installer.
+
+LANCEMENT
+  Windows : double-cliquez sur Participants.exe
+            (si Windows affiche « Windows a protégé votre PC » :
+             Informations complémentaires > Exécuter quand même).
+  Mac     : double-cliquez sur Lancer-Mac.command
+            (la première fois : clic droit > Ouvrir > Ouvrir).
+
+  Une fenêtre noire s'ouvre, puis votre navigateur affiche l'application.
+  Ne fermez pas la fenêtre noire.
+
+PREMIÈRE UTILISATION
+  Choisissez un mot de passe. Il chiffre toutes les données.
+  ATTENTION : s'il est perdu, les données sont irrécupérables. Notez-le en lieu sûr.
+
+UTILISATION
+  - « + Nouveau participant » : saisie. Un ID aléatoire est attribué (le pseudonyme).
+  - Le même nom + prénom + date de naissance est signalé comme doublon.
+  - « Exporter » : fichier complet, ou pseudonymisé (sans nom, e-mail, téléphone ;
+    âge à la place de la date de naissance) pour les analyses.
+  - « Importer » : reprend un fichier Excel (.xlsx/.xlsm) ou CSV avec les colonnes
+    Nom, Prénom, Date de naissance, Sexe, Taille, Poids, Numéro, Email, Code Manip,
+    Date d'ajout, ID. Les ID existants sont conservés.
+  - « Quitter » : à utiliser pour terminer proprement.
+
+SAUVEGARDES
+  Une copie chiffrée est faite à chaque ouverture, à chaque fermeture après modification,
+  et sur demande (Plus > Sauvegarder maintenant), dans le dossier « backups ».
+  Les 30 plus récentes sont conservées, plus la dernière de chaque mois.
+  Une sauvegarde s'ouvre avec le mot de passe qui était valide au moment où elle a été faite.
+  Pour restaurer : fermez l'application, remplacez data\participants.pdb par la copie
+  souhaitée (renommée participants.pdb).
+  Les sauvegardes sont sur la même clé : pensez à copier le dossier « Participants »
+  régulièrement ailleurs.
+
+MISE À JOUR
+  Remplacez uniquement les fichiers Participants.exe, Participants-mac-* et
+  Lancer-Mac.command. Ne touchez jamais aux dossiers « data » et « backups ».
+
+SUPPRESSION D'UN PARTICIPANT
+  Le bouton « Supprimer » retire la personne de la base. Les sauvegardes antérieures
+  en gardent une copie chiffrée : supprimez-les du dossier « backups » si nécessaire.
