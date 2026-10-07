@@ -43,7 +43,9 @@ func run(dataFlag string, noBrowser bool) error {
 		if exe, err = filepath.EvalSymlinks(exe); err != nil {
 			return err
 		}
-		root = filepath.Join(filepath.Dir(exe), "data")
+		appDir := filepath.Dir(exe)
+		checkAndApplyZipUpdate(appDir, version)
+		root = filepath.Join(appDir, "data")
 	}
 	dataDir, err := filepath.Abs(root)
 	if err != nil {
@@ -80,7 +82,7 @@ func run(dataFlag string, noBrowser bool) error {
 	go srv.WatchIdle()
 
 	url := fmt.Sprintf("http://127.0.0.1:%d/", port)
-	fmt.Printf("Participants (pseudonymisation) %s\n\nL'application est ouverte dans votre navigateur :\n  %s\n\n", version, url)
+	fmt.Printf("App-Pseudonymisation-TKS %s\n\nL'application est ouverte dans votre navigateur :\n  %s\n\n", version, url)
 	fmt.Println("NE FERMEZ PAS cette fenêtre. Pour terminer, utilisez le bouton « Quitter » dans le navigateur.")
 	if !noBrowser {
 		openBrowser(url)

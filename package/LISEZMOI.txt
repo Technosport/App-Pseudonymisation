@@ -5,7 +5,7 @@ INSTALLER
   Copiez le dossier « Participants » sur votre clé USB. C'est tout.
 
 LANCER
-  Windows : double-clic sur Participants.exe
+  Windows : double-clic sur App-Pseudonymisation-TKS.exe
             (si un avertissement apparaît : « Informations complémentaires »
              puis « Exécuter quand même »)
   Mac     : double-clic sur Lancer-Mac.command
@@ -27,6 +27,7 @@ SAUVEGARDES
   Automatiques, dans le dossier « backups » de la clé.
   Copiez régulièrement le dossier « Participants » ailleurs.
 
-METTRE À JOUR
-  Remplacez Participants.exe, Participants-mac-* et Lancer-Mac.command.
-  Ne touchez jamais aux dossiers « data » et « backups ».
+METTRE À JOUR (AUTOMATIQUE)
+  1. Déposez simplement le fichier .zip de la nouvelle version à la racine de la clé USB (ou dans le dossier « Participants »).
+  2. Lancez l'application normalement : la mise à jour est détectée et appliquée automatiquement.
+  3. Vos données (« data » et « backups ») et votre mot de passe sont strictement préservés.
