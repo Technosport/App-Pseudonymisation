@@ -17,8 +17,9 @@ var zipVersionRegex = regexp.MustCompile(`(?i)(?:participants|app-pseudonymisati
 // ou dans le dossier de l'exécutable, et applique les nouveaux binaires si sa version est plus récente.
 func checkAndApplyZipUpdate(appDir string, currentVersion string) {
 	candidatesDirs := []string{
-		filepath.Dir(appDir), // Racine de la clé USB (parent du dossier app)
-		appDir,                // Directement dans le dossier de l'app
+		filepath.Dir(appDir),                    // Racine de la clé USB (parent du dossier app)
+		appDir,                                   // Directement dans le dossier de l'app
+		filepath.Join(filepath.Dir(appDir), "Participants"), // Cas de transition d'ancien dossier
 	}
 
 	seen := map[string]bool{}

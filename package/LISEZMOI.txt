@@ -2,7 +2,7 @@ PSEUDONYMISATION
 ================
 
 INSTALLER
-  Copiez le dossier « Participants » sur votre clé USB. C'est tout.
+  Copiez le dossier « App-Pseudonymisation-TKS » sur votre clé USB. C'est tout.
 
 LANCER
   Windows : double-clic sur App-Pseudonymisation-TKS.exe
@@ -25,9 +25,9 @@ UTILISER
 
 SAUVEGARDES
   Automatiques, dans le dossier « backups » de la clé.
-  Copiez régulièrement le dossier « Participants » ailleurs.
+  Copiez régulièrement le dossier « App-Pseudonymisation-TKS » (ou l'ancien « Participants ») ailleurs.
 
 METTRE À JOUR (AUTOMATIQUE)
-  1. Déposez simplement le fichier .zip de la nouvelle version à la racine de la clé USB (ou dans le dossier « Participants »).
+  1. Déposez simplement le fichier .zip de la nouvelle version à la racine de la clé USB (ou dans votre dossier d'application).
   2. Lancez l'application normalement : la mise à jour est détectée et appliquée automatiquement.
   3. Vos données (« data » et « backups ») et votre mot de passe sont strictement préservés.

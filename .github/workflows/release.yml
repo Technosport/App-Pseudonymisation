@@ -21,7 +21,7 @@ jobs:
       - name: Build
         run: |
           V="${GITHUB_REF_NAME}"
-          D="Participants"
+          D="App-Pseudonymisation-TKS"
           mkdir -p "$D"
           LDF="-s -w -X main.version=${V}"
           GOOS=windows GOARCH=amd64 go build -trimpath -ldflags "$LDF" -o "$D/App-Pseudonymisation-TKS.exe" .

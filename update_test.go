@@ -47,15 +47,15 @@ func TestApplyZipPreservesData(t *testing.T) {
 	}
 	zw := zip.NewWriter(zf)
 
-	// Fichier dans le zip
-	f1, err := zw.Create("Participants/App-Pseudonymisation-TKS.exe")
+	// Fichier dans le zip (dossier App-Pseudonymisation-TKS)
+	f1, err := zw.Create("App-Pseudonymisation-TKS/App-Pseudonymisation-TKS.exe")
 	if err != nil {
 		t.Fatal(err)
 	}
 	_, _ = f1.Write([]byte("NEW_EXE"))
 
 	// Tente d'écraser la base dans le zip (doit être ignoré)
-	f2, err := zw.Create("Participants/data/participants.pdb")
+	f2, err := zw.Create("App-Pseudonymisation-TKS/data/participants.pdb")
 	if err != nil {
 		t.Fatal(err)
 	}
