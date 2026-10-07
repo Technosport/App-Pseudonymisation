@@ -1,6 +1,6 @@
 # Pseudonymisation
 
-Application simple pour enregistrer des participants à des expérimentations et leur attribuer un identifiant pseudonyme. Fonctionne sur **Windows et Mac**, depuis une clé USB, **sans rien installer**. Les données sont chiffrées par mot de passe.
+Application pour enregistrer des participants à des expérimentations et leur attribuer un pseudonyme. Fonctionne sur **Windows et Mac**, depuis une clé USB, **sans rien installer**. Les données sont chiffrées par mot de passe.
 
 ## Utiliser
 
