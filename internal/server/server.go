@@ -13,7 +13,6 @@ import (
 	"net"
 	"net/http"
 	"path/filepath"
-	"sort"
 	"strings"
 	"sync"
 	"time"
@@ -270,23 +269,24 @@ func (s *Server) unlock(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) list(w http.ResponseWriter, r *http.Request) {
-	ps := s.store().List()
+	all := s.store().List()
 	q := strings.ToLower(strings.TrimSpace(r.URL.Query().Get("q")))
-	if q != "" {
-		out := ps[:0:0]
-		for _, p := range ps {
+	// N est le numéro de ligne dans l'ordre d'enregistrement, stable même lors d'une recherche.
+	type row struct {
+		store.Participant
+		N int `json:"n"`
+	}
+	out := []row{}
+	for i, p := range all {
+		if q != "" {
 			hay := strings.ToLower(strings.Join([]string{p.ID, p.Nom, p.Prenom, p.CodeManip, p.Email, p.Telephone}, " "))
-			if strings.Contains(hay, q) {
-				out = append(out, p)
+			if !strings.Contains(hay, q) {
+				continue
 			}
 		}
-		ps = out
+		out = append(out, row{p, i + 1})
 	}
-	sort.SliceStable(ps, func(i, j int) bool { return ps[i].DateAjout > ps[j].DateAjout })
-	if ps == nil {
-		ps = []store.Participant{}
-	}
-	writeJSON(w, 200, map[string]any{"participants": ps, "total": len(s.store().List())})
+	writeJSON(w, 200, map[string]any{"participants": out, "total": len(all)})
 }
 
 type pBody struct {
@@ -338,7 +338,6 @@ func (s *Server) remove(w http.ResponseWriter, r *http.Request) {
 
 func (s *Server) export(w http.ResponseWriter, r *http.Request) {
 	ps := s.store().List()
-	sort.SliceStable(ps, func(i, j int) bool { return ps[i].DateAjout < ps[j].DateAjout })
 	mode, format := r.URL.Query().Get("mode"), r.URL.Query().Get("format")
 	var rows [][]string
 	name := "participants"

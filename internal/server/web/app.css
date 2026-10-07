@@ -22,6 +22,10 @@ header input[type=search] { flex:1; min-width:200px; }
 .menu > div a:hover, .menu > div button:hover { background:#eef1f5; }
 .notice { margin:.8rem 1.2rem; padding:.7rem 1rem; border-radius:6px; background:#e8f1ff; border:1px solid #b6d0ff; white-space:pre-line; }
 .notice.bad { background:#fdecea; border-color:#f5b5ae; }
+.logo { height:30px; max-width:100%; } .logo-big { width:100%; max-width:340px; height:auto; justify-self:center; }
+.pwfield { display:flex; gap:.3rem; } .pwfield input { flex:1; min-width:0; }
+button.eye { padding:.3rem .6rem; line-height:1; }
+td.n, th.n { color:var(--muted); text-align:right; width:1%; }
 .tablewrap { overflow-x:auto; }
 table { width:calc(100% - 2.4rem); margin:1rem 1.2rem; border-collapse:collapse; background:#fff; border-radius:8px; overflow:hidden; }
 th, td { text-align:left; padding:.5rem .7rem; border-bottom:1px solid var(--line); font-size:.9rem; }

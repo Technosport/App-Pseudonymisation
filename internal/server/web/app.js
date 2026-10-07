@@ -48,8 +48,8 @@ $("loginForm").addEventListener("submit", async (e) => {
   finally { $("loginBtn").disabled = false; }
 });
 
-const FULL = [["id","ID"],["nom","Nom"],["prenom","Prénom"],["dateNaissance","Naissance"],["sexe","Sexe"],["taille","Taille"],["poids","Poids"],["telephone","Téléphone"],["email","E-mail"],["codeManip","Code Manip"],["dateAjout","Ajouté le"]];
-const ANON = ["id","sexe","taille","poids","codeManip","dateAjout"];
+const FULL = [["n","N°"],["id","ID"],["dateAjout","Ajouté le"],["nom","Nom"],["prenom","Prénom"],["dateNaissance","Naissance"],["sexe","Sexe"],["taille","Taille"],["poids","Poids"],["telephone","Téléphone"],["email","E-mail"],["codeManip","Code Manip"]];
+const ANON = ["n","id","dateAjout","sexe","taille","poids","codeManip"];
 const cols = () => FULL.filter(([k]) => !anon || ANON.includes(k));
 
 function fmtDate(s) { return /^\d{4}-\d{2}-\d{2}$/.test(s || "") ? s.split("-").reverse().join("/") : (s || ""); }
@@ -58,12 +58,12 @@ function td(text, cls) { const c = document.createElement("td"); c.textContent =
 
 function render(list, total) {
   const head = $("thead"); head.replaceChildren();
-  cols().forEach(([, label]) => { const th = document.createElement("th"); th.textContent = label; head.appendChild(th); });
+  cols().forEach(([k, label]) => { const th = document.createElement("th"); th.textContent = label; if (k === "n") th.className = "n"; head.appendChild(th); });
   if (!anon) head.appendChild(document.createElement("th"));
   const body = $("rows"); body.replaceChildren();
   for (const p of list) {
     const tr = document.createElement("tr");
-    cols().forEach(([k]) => tr.appendChild(td(k === "dateNaissance" || k === "dateAjout" ? fmtDate(p[k]) : p[k], k === "id" ? "id" : "")));
+    cols().forEach(([k]) => tr.appendChild(td(k === "dateNaissance" || k === "dateAjout" ? fmtDate(p[k]) : p[k], k === "id" ? "id" : k === "n" ? "n" : "")));
     if (!anon) {
       const a = td("", "act");
       const e = document.createElement("button"); e.textContent = "Modifier"; e.onclick = () => openForm(p);
@@ -119,6 +119,7 @@ $("pForm").addEventListener("submit", async (e) => {
     }
     $("formDlg").close();
     await refresh();
+    if (!editingId) window.scrollTo(0, document.body.scrollHeight);
     notice(editingId ? "Participant modifié." : `Participant enregistré. ID : ${saved.id}`);
   } catch (err) { $("formErr").textContent = err.message; }
 });
@@ -176,6 +177,15 @@ $("auditBtn").onclick = async () => {
   } catch (err) { notice(err.message, true); }
 };
 $("auditClose").onclick = () => $("auditDlg").close();
+
+document.querySelectorAll("button.eye").forEach((b) => b.addEventListener("click", () => {
+  const i = $(b.dataset.target);
+  const show = i.type === "password";
+  i.type = show ? "text" : "password";
+  b.setAttribute("aria-label", show ? "Masquer le mot de passe" : "Afficher le mot de passe");
+  b.style.opacity = show ? "0.5" : "1";
+  i.focus();
+}));
 
 function closeMenus() { document.querySelectorAll("details.menu").forEach((d) => d.open = false); }
 document.addEventListener("click", (e) => { if (!e.target.closest("details.menu")) closeMenus(); });

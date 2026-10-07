@@ -5,15 +5,21 @@
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Pseudonymisation – Participants</title>
 <link rel="stylesheet" href="app.css">
+<link rel="icon" href="logo.png">
 </head>
 <body>
 
 <section id="login" class="center hidden">
   <form id="loginForm" class="card" autocomplete="off">
+    <img src="logo.png" alt="Technosport" class="logo-big">
     <h1>Participants</h1>
     <p id="loginHelp"></p>
-    <label>Mot de passe <input type="password" id="pw" required autofocus></label>
-    <label id="pw2row" class="hidden">Confirmer le mot de passe <input type="password" id="pw2"></label>
+    <label>Mot de passe
+      <span class="pwfield"><input type="password" id="pw" required autofocus><button type="button" class="eye" data-target="pw" aria-label="Afficher le mot de passe" title="Afficher / masquer">👁</button></span>
+    </label>
+    <label id="pw2row" class="hidden">Confirmer le mot de passe
+      <span class="pwfield"><input type="password" id="pw2"><button type="button" class="eye" data-target="pw2" aria-label="Afficher le mot de passe" title="Afficher / masquer">👁</button></span>
+    </label>
     <p id="pwWarn" class="warn hidden">Ce mot de passe chiffre toutes les données. S'il est perdu, elles sont <b>irrécupérables</b>. Notez-le dans un endroit sûr.</p>
     <p id="loginErr" class="error"></p>
     <button class="primary" id="loginBtn">Ouvrir</button>
@@ -22,6 +28,7 @@
 
 <section id="app" class="hidden">
   <header>
+    <img src="logo.png" alt="Technosport" class="logo">
     <h1>Participants <small id="count"></small></h1>
     <input type="search" id="search" placeholder="Rechercher (nom, prénom, ID, code manip…)">
     <button class="primary" id="addBtn">+ Nouveau participant</button>
@@ -78,8 +85,12 @@
 <dialog id="pwDlg">
   <form id="pwForm" method="dialog" autocomplete="off">
     <h2>Changer le mot de passe</h2>
-    <label>Mot de passe actuel <input type="password" id="oldPw" required></label>
-    <label>Nouveau mot de passe (8 caractères min.) <input type="password" id="newPw" required minlength="8"></label>
+    <label>Mot de passe actuel
+      <span class="pwfield"><input type="password" id="oldPw" required><button type="button" class="eye" data-target="oldPw" aria-label="Afficher le mot de passe" title="Afficher / masquer">👁</button></span>
+    </label>
+    <label>Nouveau mot de passe (8 caractères min.)
+      <span class="pwfield"><input type="password" id="newPw" required minlength="8"><button type="button" class="eye" data-target="newPw" aria-label="Afficher le mot de passe" title="Afficher / masquer">👁</button></span>
+    </label>
     <p id="pwErr" class="error"></p>
     <div class="actions">
       <button type="button" id="pwCancel">Annuler</button>
