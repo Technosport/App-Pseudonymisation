@@ -12,7 +12,7 @@ Application pour enregistrer des participants à des expérimentations et leur a
 
 Déposer simplement le nouveau fichier `.zip` à la racine de la clé USB (ou dans votre dossier d'application). Au prochain lancement, la mise à jour s'applique automatiquement en conservant les données et le mot de passe.
 
-Mode d'emploi complet : [package/LISEZMOI.txt](package/LISEZMOI.txt)
+Mode d'emploi complet : [package/README.txt](package/README.txt)
 
 > Mot de passe perdu = données perdues. Ne jamais déposer de données réelles dans ce dépôt.
 

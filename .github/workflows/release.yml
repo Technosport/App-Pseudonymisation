@@ -27,7 +27,7 @@ jobs:
           GOOS=windows GOARCH=amd64 go build -trimpath -ldflags "$LDF" -o "$D/App-Pseudonymisation-TKS.exe" .
           GOOS=darwin  GOARCH=arm64 go build -trimpath -ldflags "$LDF" -o "$D/App-Pseudonymisation-TKS-mac-arm64" .
           GOOS=darwin  GOARCH=amd64 go build -trimpath -ldflags "$LDF" -o "$D/App-Pseudonymisation-TKS-mac-intel" .
-          cp package/LISEZMOI.txt package/Lancer-Mac.command "$D/"
+          cp package/README.txt package/Lancer-Mac.command "$D/"
           chmod +x "$D/App-Pseudonymisation-TKS-mac-arm64" "$D/App-Pseudonymisation-TKS-mac-intel" "$D/Lancer-Mac.command"
           zip -r "App-Pseudonymisation-TKS-${V}.zip" "$D"
       - uses: softprops/action-gh-release@v2
