@@ -110,13 +110,15 @@ func applyZip(zipFile, destDir string) error {
 	}
 	defer r.Close()
 
+	installedFiles := make(map[string]bool)
+
 	for _, f := range r.File {
 		// Normalise le chemin relatif dans le zip
-		// Souvent le zip contient un sous-dossier racine (ex: Participants/App-Pseudonymisation-TKS.exe)
+		// Souvent le zip contient un sous-dossier racine (ex: App-Pseudonymisation-TKS/...)
 		cleanPath := path.Clean(strings.ReplaceAll(f.Name, "\\", "/"))
 		parts := strings.Split(cleanPath, "/")
 		if len(parts) > 1 {
-			// Retire le premier dossier englobant s'il existe (ex: Participants/...)
+			// Retire le premier dossier englobant s'il existe
 			parts = parts[1:]
 		}
 		rel := filepath.Join(parts...)
@@ -141,8 +143,63 @@ func applyZip(zipFile, destDir string) error {
 		if err := extractFile(f, targetPath); err != nil {
 			return err
 		}
+		installedFiles[filepath.Clean(targetPath)] = true
 	}
+
+	// Nettoyage intelligent : supprime les anciens fichiers applicatifs obsolètes qui ne sont plus dans le zip
+	cleanupObsoleteFiles(destDir, installedFiles)
+
 	return nil
+}
+
+func cleanupObsoleteFiles(destDir string, keepFiles map[string]bool) {
+	entries, err := os.ReadDir(destDir)
+	if err != nil {
+		return
+	}
+
+	for _, e := range entries {
+		name := e.Name()
+		fullPath := filepath.Clean(filepath.Join(destDir, name))
+
+		// Règle 1 : Ne JAMAIS toucher aux dossiers
+		if e.IsDir() {
+			continue
+		}
+
+		// Règle 2 : Ne pas toucher aux fichiers qui viennent d'être installés par la mise à jour
+		if keepFiles[fullPath] {
+			continue
+		}
+
+		// Règle 3 : Ne jamais toucher aux fichiers de verrou ou de données
+		lower := strings.ToLower(name)
+		if lower == ".instance" || strings.HasSuffix(lower, ".pdb") {
+			continue
+		}
+
+		// Règle 4 : Ne jamais toucher aux documents personnels de l'utilisateur (.xlsx, .csv, .pdf...)
+		if strings.HasSuffix(lower, ".xlsx") || strings.HasSuffix(lower, ".csv") || strings.HasSuffix(lower, ".pdf") {
+			continue
+		}
+
+		// Règle 5 : Supprimer les anciens fichiers applicatifs (.exe, .command, binaires mac, docs obsolètes, fichiers résiduels)
+		isAppFile := strings.HasSuffix(lower, ".exe") ||
+			strings.HasSuffix(lower, ".command") ||
+			strings.HasSuffix(lower, ".old") ||
+			strings.HasSuffix(lower, ".tmp") ||
+			strings.HasSuffix(lower, ".txt") ||
+			strings.Contains(lower, "participants-mac") ||
+			strings.Contains(lower, "pseudonymisation-mac")
+
+		if isAppFile {
+			if err := os.Remove(fullPath); err != nil {
+				// Sous Windows, si le binaire en cours d'exécution ne peut pas être supprimé directement,
+				// on le renomme en .old pour qu'il ne parasite plus le dossier
+				_ = os.Rename(fullPath, fullPath+".old")
+			}
+		}
+	}
 }
 
 func extractFile(f *zip.File, target string) error {

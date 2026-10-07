@@ -80,3 +80,60 @@ func TestApplyZipPreservesData(t *testing.T) {
 		t.Fatalf("database was corrupted or overwritten: %v, content=%s", err, string(dbContent))
 	}
 }
+
+func TestApplyZipCleansObsoleteFiles(t *testing.T) {
+	tmpDir := t.TempDir()
+	appDir := filepath.Join(tmpDir, "App-Pseudonymisation-TKS")
+	if err := os.MkdirAll(appDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+
+	// Ancien fichier à nettoyer
+	oldExe := filepath.Join(appDir, "Participants.exe")
+	if err := os.WriteFile(oldExe, []byte("OLD"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	oldDoc := filepath.Join(appDir, "LISEZMOI.txt")
+	if err := os.WriteFile(oldDoc, []byte("OLD"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	// Document personnel de l'utilisateur à NE PAS nettoyer
+	userDoc := filepath.Join(appDir, "export.xlsx")
+	if err := os.WriteFile(userDoc, []byte("USER_DATA"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	// Nouveau zip contenant App-Pseudonymisation-TKS.exe et README.txt
+	zipPath := filepath.Join(tmpDir, "App-Pseudonymisation-TKS-v0.1.4.zip")
+	zf, err := os.Create(zipPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	zw := zip.NewWriter(zf)
+
+	f1, _ := zw.Create("App-Pseudonymisation-TKS/App-Pseudonymisation-TKS.exe")
+	_, _ = f1.Write([]byte("NEW_EXE"))
+	f2, _ := zw.Create("App-Pseudonymisation-TKS/README.txt")
+	_, _ = f2.Write([]byte("NEW_DOC"))
+
+	zw.Close()
+	zf.Close()
+
+	if err := applyZip(zipPath, appDir); err != nil {
+		t.Fatalf("applyZip failed: %v", err)
+	}
+
+	// Les anciens fichiers applicatifs doivent avoir été supprimés
+	if _, err := os.Stat(oldExe); !os.IsNotExist(err) {
+		t.Errorf("expected %s to be deleted, err=%v", oldExe, err)
+	}
+	if _, err := os.Stat(oldDoc); !os.IsNotExist(err) {
+		t.Errorf("expected %s to be deleted, err=%v", oldDoc, err)
+	}
+
+	// Le fichier personnel de l'utilisateur doit être resté intact
+	if content, err := os.ReadFile(userDoc); err != nil || string(content) != "USER_DATA" {
+		t.Errorf("user personal file should be preserved, got err=%v", err)
+	}
+}
