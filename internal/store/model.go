@@ -56,7 +56,10 @@ func parseNumber(label, s string, min, max float64) (string, error) {
 }
 
 // Normalize valide et nettoie un participant. L'ID et la date d'ajout ne sont pas gérés ici.
-func Normalize(p Participant) (Participant, error) {
+func Normalize(p Participant) (Participant, error) { return normalize(p, false) }
+
+// normalize en mode « lenient » (import de données historiques) conserve un e-mail invalide tel quel.
+func normalize(p Participant, lenient bool) (Participant, error) {
 	p.Nom = strings.TrimSpace(p.Nom)
 	p.Prenom = strings.TrimSpace(p.Prenom)
 	p.Telephone = strings.TrimSpace(p.Telephone)
@@ -70,14 +73,19 @@ func Normalize(p Participant) (Participant, error) {
 	if p.Prenom == "" {
 		return p, errors.New("le prénom est obligatoire")
 	}
-	d, err := ParseDate(p.DateNaissance)
-	if err != nil {
-		return p, errors.New("la date de naissance est obligatoire et doit être valide")
+	var err error
+	if strings.TrimSpace(p.DateNaissance) == "" {
+		p.DateNaissance = ""
+	} else {
+		d, err := ParseDate(p.DateNaissance)
+		if err != nil {
+			return p, errors.New("la date de naissance est invalide")
+		}
+		if t, _ := time.Parse("2006-01-02", d); t.Year() < 1900 || t.After(time.Now()) {
+			return p, errors.New("la date de naissance est hors limites")
+		}
+		p.DateNaissance = d
 	}
-	if t, _ := time.Parse("2006-01-02", d); t.Year() < 1900 || t.After(time.Now()) {
-		return p, errors.New("la date de naissance est hors limites")
-	}
-	p.DateNaissance = d
 
 	switch strings.ToLower(p.Sexe) {
 	case "homme", "h", "m":
@@ -94,7 +102,7 @@ func Normalize(p Participant) (Participant, error) {
 	if p.Poids, err = parseNumber("le poids", p.Poids, 2, 400); err != nil {
 		return p, err
 	}
-	if p.Email != "" {
+	if p.Email != "" && !lenient {
 		a, err := mail.ParseAddress(p.Email)
 		if err != nil || a.Address != p.Email || !strings.Contains(p.Email[strings.Index(p.Email, "@"):], ".") {
 			return p, errors.New("l'adresse e-mail est invalide")

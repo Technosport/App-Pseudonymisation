@@ -148,6 +148,29 @@ func TestImport(t *testing.T) {
 	}
 }
 
+func TestImportKeepsLegacyRows(t *testing.T) {
+	s, _ := newStore(t)
+	first, second, noDob, badMail := sample(), sample(), sample(), sample()
+	first.ID, second.ID = "AAAA1111", "BBBB2222"
+	noDob.Nom, noDob.DateNaissance, noDob.ID = "SansDate", "", "CCCC3333"
+	badMail.Nom, badMail.Email, badMail.ID = "Mail", "aa", "DDDD4444"
+	recs := []ImportRecord{{1, first}, {2, second}, {3, noDob}, {4, badMail}}
+	rep, err := s.Import(recs)
+	if err != nil || rep.Added != 4 || rep.SamePerson != 1 || rep.Duplicates != 0 || len(rep.Errors) != 0 {
+		t.Fatalf("rapport: %+v %v", rep, err)
+	}
+	for _, id := range []string{"AAAA1111", "BBBB2222", "CCCC3333", "DDDD4444"} {
+		if _, err := s.Get(id); err != nil {
+			t.Fatalf("ID %s perdu", id)
+		}
+	}
+	// Réimporter le même fichier ne doit rien ajouter.
+	rep, _ = s.Import(recs)
+	if rep.Added != 0 || rep.Duplicates != 4 {
+		t.Fatalf("réimport: %+v", rep)
+	}
+}
+
 func TestChangePassword(t *testing.T) {
 	s, path := newStore(t)
 	s.Add(sample(), false)

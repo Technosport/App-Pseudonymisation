@@ -137,6 +137,7 @@ $("file").addEventListener("change", async () => {
   try {
     const r = await api("POST", "/api/import", fd);
     let msg = `Import terminé : ${r.added} ajouté(s), ${r.duplicates} doublon(s) ignoré(s).`;
+    if (r.samePerson) msg += `\n${r.samePerson} personne(s) déjà présente(s) importée(s) avec leur ID d'origine (ID différent).`;
     if (r.newIds) msg += `\n${r.newIds} nouvel(le)s ID générés (ID absent ou déjà utilisé).`;
     if (r.errors.length) msg += `\n${r.errors.length} ligne(s) refusée(s) :\n` + r.errors.slice(0, 15).join("\n") + (r.errors.length > 15 ? "\n…" : "");
     await refresh(); notice(msg, r.errors.length > 0);

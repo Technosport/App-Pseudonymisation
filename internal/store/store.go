@@ -286,7 +286,8 @@ type ImportRecord struct {
 type ImportReport struct {
 	Added      int      `json:"added"`
 	Duplicates int      `json:"duplicates"`
-	NewIDs     int      `json:"newIds"` // ID absent ou déjà pris : un nouvel ID a été généré
+	NewIDs     int      `json:"newIds"`     // ID absent ou déjà pris : un nouvel ID a été généré
+	SamePerson int      `json:"samePerson"` // personne déjà présente, importée car son ID est différent
 	Errors     []string `json:"errors"`
 }
 
@@ -302,17 +303,22 @@ func (s *Store) Import(recs []ImportRecord) (ImportReport, error) {
 			seen[identityKey(p)] = true
 		}
 		for _, r := range recs {
-			p, err := Normalize(r.P)
+			p, err := normalize(r.P, true)
 			if err != nil {
 				rep.Errors = append(rep.Errors, fmt.Sprintf("ligne %d : %v", r.Row, err))
 				continue
 			}
-			if seen[identityKey(p)] {
-				rep.Duplicates++
-				continue
-			}
 			p.ID = strings.ToUpper(strings.TrimSpace(r.P.ID))
-			if !idPattern.MatchString(p.ID) || taken[p.ID] {
+			validID := idPattern.MatchString(p.ID)
+			if seen[identityKey(p)] {
+				// Même identité : doublon, sauf si le fichier apporte un ID inédit à conserver.
+				if !validID || taken[p.ID] {
+					rep.Duplicates++
+					continue
+				}
+				rep.SamePerson++
+			}
+			if !validID || taken[p.ID] {
 				id, err := newID(taken)
 				if err != nil {
 					return err
