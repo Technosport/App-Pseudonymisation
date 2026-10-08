@@ -15,7 +15,7 @@ func sample() Participant {
 func newStore(t *testing.T) (*Store, string) {
 	t.Helper()
 	p := filepath.Join(t.TempDir(), "p.pdb")
-	s, err := Create(p, "motdepasse")
+	s, err := Create(p, "motdepasse", "", "", "", "")
 	if err != nil {
 		t.Fatal(err)
 	}

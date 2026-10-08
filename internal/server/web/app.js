@@ -17,13 +17,26 @@ async function api(method, url, body) {
 
 function show(id, on) { $(id).classList.toggle("hidden", !on); }
 
-function showLogin(setup) {
+function showLogin(setup, r) {
   setupMode = setup;
   show("login", true); show("app", false);
   $("loginHelp").textContent = setup
     ? "Première utilisation : choisissez un mot de passe (8 caractères minimum)."
-    : "Saisissez le mot de passe pour ouvrir la base.";
-  show("pw2row", setup); show("pwWarn", setup);
+    : "";
+  show("pw2row", setup); show("pwWarn", setup); show("setupFields", setup);
+  
+  ["setupTitre", "setupNom", "setupPrenom", "setupEmail"].forEach(id => $(id).required = setup);
+
+  if (!setup && r && (r.titre || r.expNom)) {
+    const meta = $("metaDisplay");
+    meta.classList.remove("hidden");
+    let html = `<div style="font-size:1.15em; color:var(--fg); font-weight:600; margin-bottom:0.4rem;">${r.titre || "App de Pseudonymisation"}</div>`;
+    if (r.expNom || r.expPrenom) html += `<div style="margin-bottom:0.15rem;">Responsable : ${r.expPrenom} ${r.expNom}</div>`;
+    if (r.expEmail) html += `<div>Contact : <a href="mailto:${r.expEmail}" style="color:var(--accent); text-decoration:none;">${r.expEmail}</a></div>`;
+    meta.innerHTML = html;
+  } else {
+    $("metaDisplay").classList.add("hidden");
+  }
   $("loginBtn").textContent = setup ? "Créer la base" : "Ouvrir";
   $("pw").value = ""; $("pw2").value = ""; $("loginErr").textContent = "";
   $("pw").focus();
@@ -40,7 +53,14 @@ $("loginForm").addEventListener("submit", async (e) => {
   if (setupMode && $("pw").value !== $("pw2").value) { $("loginErr").textContent = "Les mots de passe ne correspondent pas."; return; }
   $("loginBtn").disabled = true;
   try {
-    const r = await api("POST", setupMode ? "/api/setup" : "/api/unlock", { password: $("pw").value });
+    const payload = { password: $("pw").value };
+    if (setupMode) {
+      payload.titre = $("setupTitre").value;
+      payload.expNom = $("setupNom").value;
+      payload.expPrenom = $("setupPrenom").value;
+      payload.expEmail = $("setupEmail").value;
+    }
+    const r = await api("POST", setupMode ? "/api/setup" : "/api/unlock", payload);
     $("pw").value = ""; $("pw2").value = "";
     await enterApp();
     if (r.warning) notice(r.warning, true);
@@ -83,7 +103,60 @@ async function refresh() {
 
 async function enterApp() {
   show("login", false); show("app", true); notice("");
+  try {
+    const r = await fetch("/api/state").then((x) => x.json());
+    if (r.titre) {
+      const h1 = document.querySelector("header h1");
+      if (h1) h1.innerHTML = r.titre + ' <small id="count"></small>';
+      document.title = r.titre + ' - Participants';
+    }
+  } catch(e) {}
   await refresh();
+  checkUpdate();
+}
+
+async function checkUpdate() {
+  try {
+    const r = await api("GET", "/api/update/check");
+    if (r.available && r.info) {
+      $("updateBtn").classList.remove("hidden");
+      $("updateBtn").textContent = `Mise à jour disponible (${r.info.tag_name})`;
+      $("updateBtn").onclick = () => {
+        $("updateTitle").textContent = `Mise à jour ${r.info.tag_name}`;
+        $("updateNotes").textContent = r.info.body || "Améliorations diverses et corrections de bugs.";
+        $("updateProgress").classList.add("hidden");
+        $("updateError").classList.add("hidden");
+        $("updateActions").classList.remove("hidden");
+        $("doUpdateBtn").onclick = () => doUpdate(r.info);
+        $("updateLaterBtn").onclick = () => $("updateDialog").close();
+        $("updateDialog").showModal();
+      };
+    }
+  } catch(e) { console.error("Erreur màj:", e); }
+}
+
+async function doUpdate(info) {
+  const asset = info.assets.find(a => a.name.toLowerCase().endsWith(".zip"));
+  if (!asset) {
+    $("updateError").textContent = "Fichier d'installation non trouvé.";
+    $("updateError").classList.remove("hidden");
+    return;
+  }
+  $("updateActions").classList.add("hidden");
+  $("updateProgress").classList.remove("hidden");
+  $("updateError").classList.add("hidden");
+
+  try {
+    const r = await api("POST", "/api/update/apply", { url: asset.browser_download_url });
+    if (r.ok) {
+      document.body.innerHTML = "<div style='padding:2rem;text-align:center;'><h2>Mise à jour terminée avec succès !</h2><p>L'application a été fermée. Vous pouvez fermer cet onglet et relancer l'exécutable depuis votre clé USB.</p></div>";
+    }
+  } catch (err) {
+    $("updateError").textContent = err.message || "La mise à jour a échoué.";
+    $("updateError").classList.remove("hidden");
+    $("updateActions").classList.remove("hidden");
+    $("updateProgress").classList.add("hidden");
+  }
 }
 
 let t;
@@ -204,6 +277,6 @@ setInterval(() => fetch("/api/ping").catch(() => {}), 15000);
 (async function init() {
   try {
     const r = await fetch("/api/state").then((x) => x.json());
-    if (r.state === "unlocked") await enterApp(); else showLogin(r.state === "setup");
+    if (r.state === "unlocked") await enterApp(); else showLogin(r.state === "setup", r);
   } catch (_) { document.body.textContent = "L'application ne répond pas. Relancez-la."; }
 })();

@@ -2,13 +2,16 @@ package main
 
 import (
 	"archive/zip"
+	"encoding/json"
 	"fmt"
 	"io"
+	"net/http"
 	"os"
 	"path"
 	"path/filepath"
 	"regexp"
 	"strings"
+	"time"
 )
 
 var zipVersionRegex = regexp.MustCompile(`(?i)(?:participants|app-pseudonymisation-tks)[-_]v?(\d+\.\d+\.\d+(?:-[\w.]+)?)\.zip$`)
@@ -245,4 +248,84 @@ func extractFile(f *zip.File, target string) error {
 		return err
 	}
 	return nil
+}
+
+type ReleaseInfo struct {
+	TagName string `json:"tag_name"`
+	Body    string `json:"body"`
+	Assets  []struct {
+		Name               string `json:"name"`
+		BrowserDownloadURL string `json:"browser_download_url"`
+	} `json:"assets"`
+}
+
+func CheckRemoteUpdate(currentVersion string) (*ReleaseInfo, error) {
+	client := http.Client{Timeout: 5 * time.Second}
+	req, err := http.NewRequest("GET", "https://api.github.com/repos/Technosport/Pseudonymisation/releases/latest", nil)
+	if err != nil {
+		return nil, err
+	}
+	resp, err := client.Do(req)
+	if err != nil {
+		return nil, err
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != 200 {
+		return nil, fmt.Errorf("statut inattendu: %d", resp.StatusCode)
+	}
+
+	var release ReleaseInfo
+	if err := json.NewDecoder(resp.Body).Decode(&release); err != nil {
+		return nil, err
+	}
+
+	newVer := "v" + strings.TrimPrefix(release.TagName, "v")
+	currVer := "v" + strings.TrimPrefix(currentVersion, "v")
+
+	if currentVersion != "dev" && !isNewerVersion(currVer, newVer) {
+		return nil, nil // Pas de nouvelle mise à jour
+	}
+
+	return &release, nil
+}
+
+func ApplyRemoteUpdate(appDir string, downloadURL string) error {
+	client := http.Client{Timeout: 5 * time.Minute}
+	resp, err := client.Get(downloadURL)
+	if err != nil {
+		return err
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != 200 {
+		return fmt.Errorf("téléchargement échoué, statut: %d", resp.StatusCode)
+	}
+
+	tmpFile := filepath.Join(os.TempDir(), "pseudonymisation-update.zip")
+	out, err := os.Create(tmpFile)
+	if err != nil {
+		return err
+	}
+	if _, err := io.Copy(out, resp.Body); err != nil {
+		out.Close()
+		os.Remove(tmpFile)
+		return err
+	}
+	out.Close()
+	defer os.Remove(tmpFile)
+
+	return applyZip(tmpFile, appDir)
+}
+
+func CleanupOldFiles(appDir string) {
+	entries, err := os.ReadDir(appDir)
+	if err != nil {
+		return
+	}
+	for _, e := range entries {
+		if !e.IsDir() && strings.HasSuffix(strings.ToLower(e.Name()), ".old") {
+			_ = os.Remove(filepath.Join(appDir, e.Name()))
+		}
+	}
 }

@@ -3,7 +3,7 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>Pseudonymisation – Participants</title>
+<title>App de Pseudonymisation – Participants</title>
 <link rel="stylesheet" href="app.css">
 <link rel="icon" href="logo.png">
 </head>
@@ -12,8 +12,15 @@
 <section id="login" class="center hidden">
   <form id="loginForm" class="card" autocomplete="off">
     <img src="logo.png" alt="Technosport" class="logo-big">
-    <h1>Pseudonymisation</h1>
+    <h1 style="text-align: center;">App de Pseudonymisation</h1>
     <p id="loginHelp"></p>
+    <div id="metaDisplay" class="hidden" style="text-align: left; margin-bottom: 1rem; color: var(--muted); font-size: 0.95em; background: #eef1f5; padding: 1rem 1.2rem; border-radius: 6px;"></div>
+    <div id="setupFields" class="hidden" style="display:grid; gap:.8rem; margin-bottom:.5rem;">
+      <label>Titre de la base de pseudonymisation <input type="text" id="setupTitre" autocomplete="nope"></label>
+      <label>Nom du responsable <input type="text" id="setupNom" autocomplete="nope"></label>
+      <label>Prénom du responsable <input type="text" id="setupPrenom" autocomplete="nope"></label>
+      <label>E-mail du responsable <input type="email" id="setupEmail" autocomplete="nope"></label>
+    </div>
     <label>Mot de passe
       <span class="pwfield"><input type="password" id="pw" required autofocus><button type="button" class="eye" data-target="pw" aria-label="Afficher le mot de passe" title="Afficher / masquer">👁</button></span>
     </label>
@@ -29,8 +36,9 @@
 <section id="app" class="hidden">
   <header>
     <img src="logo.png" alt="Technosport" class="logo">
-    <h1>Pseudonymisation <small id="count"></small></h1>
-    <input type="search" id="search" placeholder="Rechercher (nom, prénom, ID, code manip…)">
+    <h1>App de Pseudonymisation <small id="count"></small></h1>
+    <input type="search" id="search" autocomplete="off" placeholder="Rechercher (nom, prénom, ID, code manip…)">
+    <button class="primary hidden" id="updateBtn">Mise à jour disponible</button>
     <button class="primary" id="addBtn">+ Nouveau participant</button>
     <button id="importBtn">Importer</button>
     <details class="menu"><summary>Exporter</summary>
@@ -104,6 +112,22 @@
   <p class="muted">Seuls l'ID et le type d'action sont enregistrés (aucune donnée personnelle).</p>
   <div class="scroll"><table><thead><tr><th>Date</th><th>Action</th><th>ID</th><th>Détail</th></tr></thead><tbody id="auditRows"></tbody></table></div>
   <div class="actions"><button id="auditClose">Fermer</button></div>
+</dialog>
+
+<dialog id="updateDialog">
+  <form method="dialog" style="display: grid; gap: 0.8rem;">
+    <h2 id="updateTitle">Mise à jour disponible</h2>
+    <div id="updateNotes" style="max-height: 200px; overflow-y: auto; margin-bottom: 1em; font-size: 0.9em; white-space: pre-wrap; word-break: break-word; background: var(--bg); padding: 0.8em; border-radius: 6px; border: 1px solid var(--line);"></div>
+    <div id="updateProgress" class="hidden" style="text-align: center; margin-bottom: 1em; padding: 1.5em; background: #e8f1ff; border-radius: 6px;">
+       <p>⏳ <strong>Téléchargement et installation en cours...</strong></p>
+       <p class="warn">Ne fermez pas cette fenêtre, l'opération prend quelques secondes.</p>
+    </div>
+    <div id="updateError" class="error hidden"></div>
+    <div class="row" id="updateActions">
+      <button type="button" class="primary" id="doUpdateBtn">Installer et redémarrer</button>
+      <button type="button" id="updateLaterBtn">Plus tard</button>
+    </div>
+  </form>
 </dialog>
 
 <script src="app.js"></script>

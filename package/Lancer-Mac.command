@@ -1,5 +1,5 @@
 #!/bin/bash
-# Lance l'application sur Mac (Intel ou Apple Silicon) depuis la clÃ© USB.
+# Lance l'application sur Mac (Intel ou Apple Silicon) depuis la clé USB.
 cd "$(dirname "$0")" || exit 1
 case "$(uname -m)" in
   arm64) BIN=./App-Pseudonymisation-TKS-mac-arm64 ;;

@@ -36,6 +36,10 @@ type AuditEntry struct {
 
 type data struct {
 	Version      int           `json:"version"`
+	Titre        string        `json:"titre,omitempty"`
+	ExpNom       string        `json:"expNom,omitempty"`
+	ExpPrenom    string        `json:"expPrenom,omitempty"`
+	ExpEmail     string        `json:"expEmail,omitempty"`
 	Participants []Participant `json:"participants"`
 	Audit        []AuditEntry  `json:"audit"`
 }
@@ -59,7 +63,7 @@ func Exists(path string) bool {
 }
 
 // Create initialise une nouvelle base chiffrée.
-func Create(path, password string) (*Store, error) {
+func Create(path, password, titre, expNom, expPrenom, expEmail string) (*Store, error) {
 	if Exists(path) {
 		return nil, ErrExists
 	}
@@ -67,7 +71,13 @@ func Create(path, password string) (*Store, error) {
 	if err != nil {
 		return nil, err
 	}
-	s := &Store{path: path, hdr: h, key: deriveKey(password, h), d: data{Version: 1}}
+	s := &Store{path: path, hdr: h, key: deriveKey(password, h), d: data{
+		Version:   1,
+		Titre:     titre,
+		ExpNom:    expNom,
+		ExpPrenom: expPrenom,
+		ExpEmail:  expEmail,
+	}}
 	if err := s.save(s.d); err != nil {
 		return nil, err
 	}
@@ -400,3 +410,10 @@ func (s *Store) Dirty() bool {
 }
 
 func (s *Store) Path() string { return s.path }
+
+// Info renvoie les métadonnées de la base (titre, nom, prénom, email).
+func (s *Store) Info() (titre, nom, prenom, email string) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.d.Titre, s.d.ExpNom, s.d.ExpPrenom, s.d.ExpEmail
+}

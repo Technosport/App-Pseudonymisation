@@ -12,6 +12,7 @@ import (
 	"io/fs"
 	"net"
 	"net/http"
+	"os"
 	"path/filepath"
 	"strings"
 	"sync"
@@ -34,6 +35,9 @@ type Server struct {
 	DBPath    string
 	BackupDir string
 	Version   string
+
+	CheckUpdate func() (any, error)
+	ApplyUpdate func(url string) error
 
 	mu       sync.Mutex
 	st       *store.Store
@@ -101,6 +105,8 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("POST /api/password", s.auth(s.password))
 	mux.HandleFunc("GET /api/audit", s.auth(s.auditLog))
 	mux.HandleFunc("POST /api/backup", s.auth(s.backup))
+	mux.HandleFunc("GET /api/update/check", s.auth(s.checkUpdate))
+	mux.HandleFunc("POST /api/update/apply", s.auth(s.applyUpdate))
 	mux.HandleFunc("POST /api/quit", s.auth(s.quitHandler))
 	return s.guard(mux)
 }
@@ -164,17 +170,38 @@ func (s *Server) ping(w http.ResponseWriter, r *http.Request) {
 
 func (s *Server) state(w http.ResponseWriter, r *http.Request) {
 	state := "setup"
+	var titre, expNom, expPrenom, expEmail string
+
 	if store.Exists(s.DBPath) {
 		state = "locked"
+		if metaBytes, err := os.ReadFile(filepath.Join(filepath.Dir(s.DBPath), "meta.json")); err == nil {
+			var m map[string]string
+			if json.Unmarshal(metaBytes, &m) == nil {
+				titre, expNom, expPrenom, expEmail = m["titre"], m["expNom"], m["expPrenom"], m["expEmail"]
+			}
+		}
 	}
 	if c, err := r.Cookie(cookieName); err == nil {
 		s.mu.Lock()
-		if s.st != nil && s.token != "" && subtle.ConstantTimeCompare([]byte(c.Value), []byte(s.token)) == 1 {
+		st := s.st
+		if st != nil && s.token != "" && subtle.ConstantTimeCompare([]byte(c.Value), []byte(s.token)) == 1 {
 			state = "unlocked"
+		} else {
+			st = nil
 		}
 		s.mu.Unlock()
+		if st != nil {
+			titre, expNom, expPrenom, expEmail = st.Info()
+		}
 	}
-	writeJSON(w, 200, map[string]any{"state": state, "version": s.Version})
+	writeJSON(w, 200, map[string]any{
+		"state":     state,
+		"version":   s.Version,
+		"titre":     titre,
+		"expNom":    expNom,
+		"expPrenom": expPrenom,
+		"expEmail":  expEmail,
+	})
 }
 
 func (s *Server) startSession(w http.ResponseWriter, st *store.Store) error {
@@ -191,9 +218,13 @@ func (s *Server) startSession(w http.ResponseWriter, st *store.Store) error {
 }
 
 type pwBody struct {
-	Password string `json:"password"`
-	Old      string `json:"old"`
-	New      string `json:"new"`
+	Password  string `json:"password"`
+	Old       string `json:"old"`
+	New       string `json:"new"`
+	Titre     string `json:"titre"`
+	ExpNom    string `json:"expNom"`
+	ExpPrenom string `json:"expPrenom"`
+	ExpEmail  string `json:"expEmail"`
 }
 
 func decode(r *http.Request, v any) error {
@@ -215,11 +246,18 @@ func (s *Server) setup(w http.ResponseWriter, r *http.Request) {
 		writeErr(w, 409, store.ErrExists.Error())
 		return
 	}
-	st, err := store.Create(s.DBPath, b.Password)
+	st, err := store.Create(s.DBPath, b.Password, b.Titre, b.ExpNom, b.ExpPrenom, b.ExpEmail)
 	if err != nil {
 		writeErr(w, 409, err.Error())
 		return
 	}
+	
+	// Sauvegarde des métadonnées en clair pour l'écran de connexion
+	metaBytes, _ := json.Marshal(map[string]string{
+		"titre": b.Titre, "expNom": b.ExpNom, "expPrenom": b.ExpPrenom, "expEmail": b.ExpEmail,
+	})
+	_ = os.WriteFile(filepath.Join(filepath.Dir(s.DBPath), "meta.json"), metaBytes, 0o644)
+
 	if err := s.startSession(w, st); err != nil {
 		writeErr(w, 500, err.Error())
 		return
@@ -429,4 +467,48 @@ func (s *Server) quitHandler(w http.ResponseWriter, r *http.Request) {
 	}
 	writeJSON(w, 200, map[string]any{"ok": true, "warning": msg})
 	go s.quitOnce.Do(func() { time.Sleep(300 * time.Millisecond); close(s.quit) })
+}
+
+func (s *Server) checkUpdate(w http.ResponseWriter, r *http.Request) {
+	if s.CheckUpdate == nil {
+		writeJSON(w, 200, map[string]any{"available": false})
+		return
+	}
+	info, err := s.CheckUpdate()
+	if err != nil || info == nil {
+		writeJSON(w, 200, map[string]any{"available": false})
+		return
+	}
+	writeJSON(w, 200, map[string]any{
+		"available": true,
+		"info":      info,
+	})
+}
+
+type applyUpdateReq struct {
+	URL string `json:"url"`
+}
+
+func (s *Server) applyUpdate(w http.ResponseWriter, r *http.Request) {
+	if s.ApplyUpdate == nil {
+		writeErr(w, 400, "Mise à jour non supportée")
+		return
+	}
+	var req applyUpdateReq
+	if err := decode(r, &req); err != nil {
+		writeErr(w, 400, "requête invalide")
+		return
+	}
+	if err := s.ApplyUpdate(req.URL); err != nil {
+		writeErr(w, 500, "Erreur de mise à jour: "+err.Error())
+		return
+	}
+	// On répond succès, puis on ferme le serveur
+	writeJSON(w, 200, map[string]any{"ok": true})
+
+	// On force l'arrêt après un court délai pour laisser la réponse HTTP partir
+	go func() {
+		time.Sleep(500 * time.Millisecond)
+		s.quitOnce.Do(func() { close(s.quit) })
+	}()
 }

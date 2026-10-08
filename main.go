@@ -44,6 +44,7 @@ func run(dataFlag string, noBrowser bool) error {
 			return err
 		}
 		appDir := filepath.Dir(exe)
+		CleanupOldFiles(appDir)
 		checkAndApplyZipUpdate(appDir, version)
 		root = filepath.Join(appDir, "data")
 	}
@@ -77,13 +78,22 @@ func run(dataFlag string, noBrowser bool) error {
 	defer os.Remove(lockPath)
 
 	srv := server.New(filepath.Join(dataDir, "participants.pdb"), backupDir, version)
+	
+	// Inject update callbacks
+	appDirForUpdate := filepath.Dir(dataDir) // since dataDir is inside appDir
+	srv.CheckUpdate = func() (any, error) {
+		return CheckRemoteUpdate(version)
+	}
+	srv.ApplyUpdate = func(url string) error {
+		return ApplyRemoteUpdate(appDirForUpdate, url)
+	}
+
 	httpSrv := &http.Server{Handler: srv.Handler(), ReadHeaderTimeout: 10 * time.Second}
 	go httpSrv.Serve(ln)
 	go srv.WatchIdle()
 
 	url := fmt.Sprintf("http://127.0.0.1:%d/", port)
-	fmt.Printf("App-Pseudonymisation-TKS %s\n\nL'application est ouverte dans votre navigateur :\n  %s\n\n", version, url)
-	fmt.Println("NE FERMEZ PAS cette fenêtre. Pour terminer, utilisez le bouton « Quitter » dans le navigateur.")
+	printBanner(version, url)
 	if !noBrowser {
 		openBrowser(url)
 	}
