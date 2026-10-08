@@ -39,6 +39,9 @@ function showLogin(setup, r) {
   }
   $("loginBtn").textContent = setup ? "Créer la base" : "Ouvrir";
   $("pw").value = ""; $("pw2").value = ""; $("loginErr").textContent = "";
+  if (r && r.version) {
+    $("loginVersion").textContent = `v${r.version.replace(/^v/, '')}`;
+  }
   if (setup) $("setupTitre").focus(); else $("pw").focus();
 }
 
@@ -109,6 +112,9 @@ async function enterApp() {
       const h1 = document.querySelector("header h1");
       if (h1) h1.innerHTML = r.titre + ' <small id="count"></small>';
       document.title = r.titre + ' - Participants';
+    }
+    if (r.version) {
+      $("appVersion").textContent = `Version ${r.version}`;
     }
   } catch(e) {}
   await refresh();

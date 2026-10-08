@@ -30,6 +30,7 @@
     <p id="pwWarn" class="warn hidden">Ce mot de passe chiffre toutes les données. S'il est perdu, elles sont <b>irrécupérables</b>. Notez-le dans un endroit sûr.</p>
     <p id="loginErr" class="error"></p>
     <button class="primary" id="loginBtn">Ouvrir</button>
+    <div id="loginVersion" style="text-align: center; color: var(--muted); font-size: 0.75rem; margin-top: 0.4rem;"></div>
   </form>
 </section>
 
@@ -66,6 +67,9 @@
     <tbody id="rows"></tbody>
   </table></div>
   <p id="empty" class="muted hidden">Aucun participant.</p>
+  <footer id="appFooter" style="text-align: center; padding: 1.2rem; color: var(--muted); font-size: 0.8rem; border-top: 1px solid var(--line); margin-top: 2rem;">
+    Technosport AMU · <span id="appVersion"></span>
+  </footer>
 </section>
 
 <dialog id="formDlg">
