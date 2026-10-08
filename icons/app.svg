@@ -1,0 +1,15 @@
+<svg width="512" height="512" viewBox="0 0 512 512" fill="none" xmlns="http://www.w3.org/2000/svg">
+  <!-- Squircle sombre flottant sans fond autour -->
+  <rect x="24" y="24" width="464" height="464" rx="105" fill="#0f172a"/>
+  <!-- Silhouette 1 (Arrière) -->
+  <circle cx="205" cy="175" r="50" fill="#475569"/>
+  <path d="M 120 405 C 120 320 160 285 205 275 C 250 285 290 320 290 405 Z" fill="#475569"/>
+  <!-- Silhouette 2 (Avant, blanche) -->
+  <circle cx="285" cy="205" r="48" fill="#f8fafc"/>
+  <path d="M 200 410 C 200 330 240 295 285 285 C 330 295 370 330 370 410 Z" fill="#f8fafc"/>
+  <!-- Cadenas cyan électrique au centre bas -->
+  <path d="M 228 322 V 288 C 228 270 240 258 256 258 C 272 258 284 270 284 288 V 322" stroke="#38bdf8" stroke-width="18" stroke-linecap="round" fill="none"/>
+  <rect x="207" y="315" width="98" height="90" rx="20" fill="#38bdf8"/>
+  <circle cx="256" cy="350" r="9" fill="#0f172a"/>
+  <path d="M 253 352 L 251 374 C 251 376 253 378 256 378 C 259 378 261 376 261 374 L 259 352 Z" fill="#0f172a"/>
+</svg>
