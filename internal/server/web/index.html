@@ -118,9 +118,12 @@
   <form method="dialog" style="display: grid; gap: 0.8rem;">
     <h2 id="updateTitle">Mise à jour disponible</h2>
     <div id="updateNotes" style="max-height: 200px; overflow-y: auto; margin-bottom: 1em; font-size: 0.9em; white-space: pre-wrap; word-break: break-word; background: var(--bg); padding: 0.8em; border-radius: 6px; border: 1px solid var(--line);"></div>
-    <div id="updateProgress" class="hidden" style="text-align: center; margin-bottom: 1em; padding: 1.5em; background: #e8f1ff; border-radius: 6px;">
-       <p>⏳ <strong>Téléchargement et installation en cours...</strong></p>
-       <p class="warn">Ne fermez pas cette fenêtre, l'opération prend quelques secondes.</p>
+    <div id="updateProgress" class="hidden" style="text-align: center; margin-bottom: 1em; padding: 1.2rem; background: #e8f1ff; border-radius: 6px; border: 1px solid #b6d0ff;">
+       <p id="updateStatusText" style="margin: 0 0 0.6rem 0; font-weight: 600;">⏳ Téléchargement en cours... (0%)</p>
+       <div style="background: #fff; border: 1px solid var(--line); border-radius: 10px; height: 12px; overflow: hidden; margin-bottom: 0.6rem;">
+         <div id="updateProgressBar" style="width: 0%; height: 100%; background: #0b8043; transition: width 0.25s ease;"></div>
+       </div>
+       <p class="warn" style="margin: 0; font-size: 0.85em;">Ne fermez pas cette fenêtre, l'opération prend quelques secondes.</p>
     </div>
     <div id="updateError" class="error hidden"></div>
     <div class="row" id="updateActions">

@@ -84,8 +84,8 @@ func run(dataFlag string, noBrowser bool) error {
 	srv.CheckUpdate = func() (any, error) {
 		return CheckRemoteUpdate(version)
 	}
-	srv.ApplyUpdate = func(url string) error {
-		return ApplyRemoteUpdate(appDirForUpdate, url)
+	srv.ApplyUpdate = func(url string, onProgress func(step string, pct int)) error {
+		return ApplyRemoteUpdate(appDirForUpdate, url, onProgress)
 	}
 
 	httpSrv := &http.Server{Handler: srv.Handler(), ReadHeaderTimeout: 10 * time.Second}

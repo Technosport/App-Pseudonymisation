@@ -290,7 +290,25 @@ func CheckRemoteUpdate(currentVersion string) (*ReleaseInfo, error) {
 	return &release, nil
 }
 
-func ApplyRemoteUpdate(appDir string, downloadURL string) error {
+type ProgressWriter struct {
+	Total      int64
+	Downloaded int64
+	OnProgress func(downloaded, total int64)
+}
+
+func (pw *ProgressWriter) Write(p []byte) (int, error) {
+	n := len(p)
+	pw.Downloaded += int64(n)
+	if pw.OnProgress != nil {
+		pw.OnProgress(pw.Downloaded, pw.Total)
+	}
+	return n, nil
+}
+
+func ApplyRemoteUpdate(appDir string, downloadURL string, onProgress func(step string, pct int)) error {
+	if onProgress != nil {
+		onProgress("download", 0)
+	}
 	client := http.Client{Timeout: 5 * time.Minute}
 	resp, err := client.Get(downloadURL)
 	if err != nil {
@@ -307,15 +325,43 @@ func ApplyRemoteUpdate(appDir string, downloadURL string) error {
 	if err != nil {
 		return err
 	}
-	if _, err := io.Copy(out, resp.Body); err != nil {
+
+	total := resp.ContentLength
+	pw := &ProgressWriter{
+		Total: total,
+		OnProgress: func(down, tot int64) {
+			if onProgress != nil {
+				pct := 0
+				if tot > 0 {
+					pct = int((down * 100) / tot)
+					if pct > 95 {
+						pct = 95
+					}
+				}
+				onProgress("download", pct)
+			}
+		},
+	}
+
+	if _, err := io.Copy(out, io.TeeReader(resp.Body, pw)); err != nil {
 		out.Close()
 		os.Remove(tmpFile)
 		return err
 	}
-	out.Close()
+	if err := out.Close(); err != nil {
+		os.Remove(tmpFile)
+		return err
+	}
 	defer os.Remove(tmpFile)
 
-	return applyZip(tmpFile, appDir)
+	if onProgress != nil {
+		onProgress("install", 95)
+	}
+	err = applyZip(tmpFile, appDir)
+	if err == nil && onProgress != nil {
+		onProgress("done", 100)
+	}
+	return err
 }
 
 func CleanupOldFiles(appDir string) {

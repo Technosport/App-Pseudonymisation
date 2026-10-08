@@ -37,15 +37,18 @@ type Server struct {
 	Version   string
 
 	CheckUpdate func() (any, error)
-	ApplyUpdate func(url string) error
+	ApplyUpdate func(url string, onProgress func(step string, pct int)) error
 
-	mu       sync.Mutex
-	st       *store.Store
-	token    string
-	closed   bool
-	lastPing time.Time
-	quit     chan struct{}
-	quitOnce sync.Once
+	mu             sync.Mutex
+	st             *store.Store
+	token          string
+	closed         bool
+	lastPing       time.Time
+	quit           chan struct{}
+	quitOnce       sync.Once
+	updateStep     string
+	updatePct      int
+	updateErr      string
 }
 
 func New(dbPath, backupDir, version string) *Server {
@@ -107,6 +110,7 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("POST /api/backup", s.auth(s.backup))
 	mux.HandleFunc("GET /api/update/check", s.auth(s.checkUpdate))
 	mux.HandleFunc("POST /api/update/apply", s.auth(s.applyUpdate))
+	mux.HandleFunc("GET /api/update/status", s.auth(s.updateStatus))
 	mux.HandleFunc("POST /api/quit", s.auth(s.quitHandler))
 	return s.guard(mux)
 }
@@ -489,6 +493,19 @@ type applyUpdateReq struct {
 	URL string `json:"url"`
 }
 
+func (s *Server) updateStatus(w http.ResponseWriter, r *http.Request) {
+	s.mu.Lock()
+	step := s.updateStep
+	pct := s.updatePct
+	errMsg := s.updateErr
+	s.mu.Unlock()
+	writeJSON(w, 200, map[string]any{
+		"step":  step,
+		"pct":   pct,
+		"error": errMsg,
+	})
+}
+
 func (s *Server) applyUpdate(w http.ResponseWriter, r *http.Request) {
 	if s.ApplyUpdate == nil {
 		writeErr(w, 400, "Mise à jour non supportée")
@@ -499,16 +516,35 @@ func (s *Server) applyUpdate(w http.ResponseWriter, r *http.Request) {
 		writeErr(w, 400, "requête invalide")
 		return
 	}
-	if err := s.ApplyUpdate(req.URL); err != nil {
-		writeErr(w, 500, "Erreur de mise à jour: "+err.Error())
+
+	s.mu.Lock()
+	if s.updateStep != "" && s.updateStep != "done" && s.updateErr == "" {
+		s.mu.Unlock()
+		writeJSON(w, 200, map[string]any{"ok": true})
 		return
 	}
-	// On répond succès, puis on ferme le serveur
-	writeJSON(w, 200, map[string]any{"ok": true})
+	s.updateStep = "download"
+	s.updatePct = 0
+	s.updateErr = ""
+	s.mu.Unlock()
 
-	// On force l'arrêt après un court délai pour laisser la réponse HTTP partir
 	go func() {
-		time.Sleep(500 * time.Millisecond)
+		err := s.ApplyUpdate(req.URL, func(step string, pct int) {
+			s.mu.Lock()
+			s.updateStep = step
+			s.updatePct = pct
+			s.mu.Unlock()
+		})
+		if err != nil {
+			s.mu.Lock()
+			s.updateErr = err.Error()
+			s.mu.Unlock()
+			return
+		}
+		// Mise à jour terminée : attend 1.5s pour que le client reçoive le 100% puis quitte
+		time.Sleep(1500 * time.Millisecond)
 		s.quitOnce.Do(func() { close(s.quit) })
 	}()
+
+	writeJSON(w, 200, map[string]any{"ok": true})
 }

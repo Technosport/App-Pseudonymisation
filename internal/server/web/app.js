@@ -115,6 +115,54 @@ async function enterApp() {
   checkUpdate();
 }
 
+function renderMarkdown(md) {
+  if (!md) return "<p>Améliorations diverses et corrections de bugs.</p>";
+  const lines = md.split("\n");
+  let html = "";
+  let inList = false;
+  for (let raw of lines) {
+    let line = raw.trim();
+    if (!line) {
+      if (inList) { html += "</ul>"; inList = false; }
+      continue;
+    }
+    // Titres
+    if (line.startsWith("### ")) {
+      if (inList) { html += "</ul>"; inList = false; }
+      html += `<h4 style="margin:0.8rem 0 0.3rem 0; font-size:1rem; color:var(--fg);">${formatInline(line.slice(4))}</h4>`;
+      continue;
+    }
+    if (line.startsWith("## ")) {
+      if (inList) { html += "</ul>"; inList = false; }
+      html += `<h3 style="margin:0.9rem 0 0.4rem 0; font-size:1.1rem; color:var(--fg);">${formatInline(line.slice(3))}</h3>`;
+      continue;
+    }
+    // Puces
+    if (line.startsWith("* ") || line.startsWith("- ")) {
+      if (!inList) { html += `<ul style="margin:0.3rem 0; padding-left:1.3rem;">`; inList = true; }
+      html += `<li style="margin-bottom:0.25rem;">${formatInline(line.slice(2))}</li>`;
+      continue;
+    }
+    // Ligne normale
+    if (inList) { html += "</ul>"; inList = false; }
+    html += `<p style="margin:0.3rem 0;">${formatInline(line)}</p>`;
+  }
+  if (inList) html += "</ul>";
+  return html;
+}
+
+function formatInline(str) {
+  // Liens markdown [texte](url)
+  str = str.replace(/\[([^\]]+)\]\(([^)]+)\)/g, '<a href="$2" target="_blank" rel="noopener" style="color:var(--accent);">$1</a>');
+  // Gras **texte**
+  str = str.replace(/\*\*([^*]+)\*\*/g, '<strong>$1</strong>');
+  // Italique *texte*
+  str = str.replace(/\*([^*]+)\*/g, '<em>$1</em>');
+  // Code `code`
+  str = str.replace(/`([^`]+)`/g, '<code style="background:var(--line); padding:0.1rem 0.3rem; border-radius:3px; font-size:0.9em;">$1</code>');
+  return str;
+}
+
 async function checkUpdate() {
   try {
     const r = await api("GET", "/api/update/check");
@@ -123,7 +171,7 @@ async function checkUpdate() {
       $("updateBtn").textContent = `Mise à jour disponible (${r.info.tag_name})`;
       $("updateBtn").onclick = () => {
         $("updateTitle").textContent = `Mise à jour ${r.info.tag_name}`;
-        $("updateNotes").textContent = r.info.body || "Améliorations diverses et corrections de bugs.";
+        $("updateNotes").innerHTML = renderMarkdown(r.info.body);
         $("updateProgress").classList.add("hidden");
         $("updateError").classList.add("hidden");
         $("updateActions").classList.remove("hidden");
@@ -145,11 +193,38 @@ async function doUpdate(info) {
   $("updateActions").classList.add("hidden");
   $("updateProgress").classList.remove("hidden");
   $("updateError").classList.add("hidden");
+  $("updateProgressBar").style.width = "0%";
+  $("updateStatusText").textContent = "⏳ Démarrage du téléchargement... (0%)";
 
   try {
-    const r = await api("POST", "/api/update/apply", { url: asset.browser_download_url });
+    const applyPromise = api("POST", "/api/update/apply", { url: asset.browser_download_url });
+
+    // Scrute la progression toutes les 250ms
+    const pollInterval = setInterval(async () => {
+      try {
+        const st = await api("GET", "/api/update/status");
+        if (st.error) {
+          clearInterval(pollInterval);
+          throw new Error(st.error);
+        }
+        const pct = Math.min(100, Math.max(0, st.pct || 0));
+        $("updateProgressBar").style.width = pct + "%";
+        if (st.step === "download") {
+          $("updateStatusText").textContent = `⏳ Téléchargement en cours... (${pct}%)`;
+        } else if (st.step === "install") {
+          $("updateStatusText").textContent = `⚙️ Installation et mise à jour des fichiers... (${pct}%)`;
+        } else if (st.step === "done") {
+          $("updateStatusText").textContent = `✅ Installation terminée ! (100%)`;
+          clearInterval(pollInterval);
+        }
+      } catch (_) {}
+    }, 250);
+
+    const r = await applyPromise;
     if (r.ok) {
-      document.body.innerHTML = "<div style='padding:2rem;text-align:center;'><h2>Mise à jour terminée avec succès !</h2><p>L'application a été fermée. Vous pouvez fermer cet onglet et relancer l'exécutable depuis votre clé USB.</p></div>";
+      setTimeout(() => {
+        document.body.innerHTML = "<div style='padding:2rem;text-align:center;'><h2>Mise à jour terminée avec succès !</h2><p>L'application a été fermée. Vous pouvez fermer cet onglet et relancer l'exécutable depuis votre clé USB.</p></div>";
+      }, 1000);
     }
   } catch (err) {
     $("updateError").textContent = err.message || "La mise à jour a échoué.";
