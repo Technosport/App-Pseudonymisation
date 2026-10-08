@@ -10,7 +10,7 @@ Application pour enregistrer des participants à des expérimentations et leur a
 
 ## Mises à jour
 
-Déposer simplement le nouveau fichier `.zip` à la racine de la clé USB (ou dans votre dossier d'application). Au prochain lancement, la mise à jour s'applique automatiquement en conservant les données et le mot de passe.
+Dès qu'une nouvelle version est publiée, un bouton vert **« Mise à jour disponible »** apparaît automatiquement dans l'application si l'ordinateur est connecté à Internet. Cliquez dessus pour télécharger et installer la mise à jour en un clic, tout en conservant vos données et votre mot de passe.
 
 Mode d'emploi complet : [package/README.txt](package/README.txt)
 

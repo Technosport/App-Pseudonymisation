@@ -27,7 +27,9 @@ SAUVEGARDES
   Automatiques, dans le dossier « backups » de la clé.
   Copiez régulièrement le dossier « App-Pseudonymisation-TKS » (ou l'ancien « Participants ») ailleurs.
 
-METTRE À JOUR (AUTOMATIQUE)
-  1. Déposez simplement le fichier .zip de la nouvelle version à la racine de la clé USB (ou dans votre dossier d'application).
-  2. Lancez l'application normalement : la mise à jour est détectée et appliquée automatiquement.
-  3. Vos données (« data » et « backups ») et votre mot de passe sont strictement préservés.
+METTRE À JOUR
+  Si l'ordinateur a accès à Internet, un bouton « Mise à jour disponible »
+  apparaît automatiquement dans l'en-tête de l'application.
+  Cliquez simplement dessus pour installer la dernière version en un clic.
+  Vos données (« data » et « backups ») et votre mot de passe sont strictement préservés.
+
