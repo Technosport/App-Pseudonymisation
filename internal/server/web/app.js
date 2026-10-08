@@ -39,7 +39,7 @@ function showLogin(setup, r) {
   }
   $("loginBtn").textContent = setup ? "Créer la base" : "Ouvrir";
   $("pw").value = ""; $("pw2").value = ""; $("loginErr").textContent = "";
-  $("pw").focus();
+  if (setup) $("setupTitre").focus(); else $("pw").focus();
 }
 
 function notice(msg, bad) {
