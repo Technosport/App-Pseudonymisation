@@ -144,6 +144,10 @@ func writeAtomic(path string, blob []byte) error {
 func (s *Store) commit(mutate func(d *data) error) error {
 	nd := data{
 		Version:      s.d.Version,
+		Titre:        s.d.Titre,
+		ExpNom:       s.d.ExpNom,
+		ExpPrenom:    s.d.ExpPrenom,
+		ExpEmail:     s.d.ExpEmail,
 		Participants: append([]Participant(nil), s.d.Participants...),
 		Audit:        append([]AuditEntry(nil), s.d.Audit...),
 	}
@@ -159,6 +163,19 @@ func (s *Store) commit(mutate func(d *data) error) error {
 	s.d = nd
 	s.dirty++
 	return nil
+}
+
+// SetInfo met à jour les métadonnées de la base.
+func (s *Store) SetInfo(titre, nom, prenom, email string) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.commit(func(d *data) error {
+		d.Titre = titre
+		d.ExpNom = nom
+		d.ExpPrenom = prenom
+		d.ExpEmail = email
+		return nil
+	})
 }
 
 func now() string   { return time.Now().Format(time.RFC3339) }
