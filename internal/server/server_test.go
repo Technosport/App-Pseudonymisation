@@ -164,3 +164,64 @@ func TestUnlockWrongThenRight(t *testing.T) {
 		t.Fatal("sauvegarde à l'ouverture manquante")
 	}
 }
+
+func TestAdminUnlockFlow(t *testing.T) {
+	c, _, dir := newClient(t)
+	c.do("POST", "/api/setup", map[string]string{"password": "chercheur_secret"}, nil)
+
+	p := map[string]string{"nom": "Dupont", "prenom": "Léa", "dateNaissance": "1995-06-01", "sexe": "Femme", "taille": "170", "poids": "62"}
+	c.do("POST", "/api/participants", p, nil)
+
+	// Relance de l'application
+	srv2 := New(filepath.Join(dir, "data", "p.pdb"), filepath.Join(dir, "backups"), "test")
+	ts := httptest.NewServer(srv2.Handler())
+	defer ts.Close()
+	jar, _ := cookiejar.New(nil)
+	cAdmin := &client{t, ts.URL, &http.Client{Jar: jar}}
+
+	validKey := "TKSR-E975-17CB-FDEF-063E-A150-2884-666E-E36C-39B7-7156-76D0-74C4-649E-7E25-D926-51BA"
+
+	// Mauvaise clé admin rejetée
+	if code, _ := cAdmin.do("POST", "/api/unlock", map[string]any{"password": "mauvaise_cle", "isAdmin": true}, nil); code != 401 {
+		t.Fatalf("mauvaise clé admin acceptée: %d", code)
+	}
+
+	// Bonne clé admin acceptée
+	code, b := cAdmin.do("POST", "/api/unlock", map[string]any{"password": validKey, "isAdmin": true}, nil)
+	if code != 200 {
+		t.Fatalf("déverrouillage admin refusé: %d %s", code, b)
+	}
+
+	// État de session
+	code, b = cAdmin.do("GET", "/api/state", nil, nil)
+	if code != 200 || !strings.Contains(string(b), `"isAdmin":true`) {
+		t.Fatalf("session non reconnue admin: %s", b)
+	}
+
+	// Liste des participants accessible en admin
+	code, b = cAdmin.do("GET", "/api/participants", nil, nil)
+	if code != 200 || !strings.Contains(string(b), "Dupont") {
+		t.Fatalf("participants inaccessibles en admin: %s", b)
+	}
+
+	// L'admin réinitialise le mot de passe utilisateur sans l'ancien mot de passe
+	code, b = cAdmin.do("POST", "/api/password", map[string]string{"new": "nouveau_chercheur_pw"}, nil)
+	if code != 200 {
+		t.Fatalf("réinitialisation mdp par admin échouée: %d %s", code, b)
+	}
+
+	// Journal d'audit contient bien les traces
+	_, auditBytes := cAdmin.do("GET", "/api/audit", nil, nil)
+	if !strings.Contains(string(auditBytes), "connexion_secours") || !strings.Contains(string(auditBytes), "reinitialisation_mdp") {
+		t.Fatalf("traces d'audit manquantes: %s", auditBytes)
+	}
+
+	// Le chercheur peut ouvrir avec son nouveau mot de passe
+	jarUser, _ := cookiejar.New(nil)
+	cUser := &client{t, ts.URL, &http.Client{Jar: jarUser}}
+	code, _ = cUser.do("POST", "/api/unlock", map[string]any{"password": "nouveau_chercheur_pw", "isAdmin": false}, nil)
+	if code != 200 {
+		t.Fatalf("ouverture chercheur avec nouveau mdp refusée: %d", code)
+	}
+}
+

@@ -12,7 +12,7 @@
 <section id="login" class="center hidden">
   <form id="loginForm" class="card" autocomplete="off">
     <img src="logo.png" alt="Technosport" class="logo-big">
-    <h1 style="text-align: center;">App de Pseudonymisation</h1>
+    <h1 id="loginTitle" style="text-align: center;">App de Pseudonymisation</h1>
     <p id="loginHelp"></p>
     <div id="metaDisplay" class="hidden" style="text-align: left; margin-bottom: 1rem; color: var(--muted); font-size: 0.95em; background: #eef1f5; padding: 1rem 1.2rem; border-radius: 6px;"></div>
     <div id="setupFields" class="hidden" style="display:grid; gap:.8rem; margin-bottom:.5rem;">
@@ -21,7 +21,10 @@
       <label>Prénom du responsable <input type="text" id="setupPrenom" autocomplete="nope"></label>
       <label>E-mail du responsable <input type="email" id="setupEmail" autocomplete="nope"></label>
     </div>
-    <label>Mot de passe
+    <div id="adminNotice" class="notice warn hidden" style="margin: 0; font-size: 0.85rem; line-height: 1.35;">
+      🔒 <b>Accès de secours réservé au Responsable Scientifique.</b><br>Toute ouverture de secours est enregistrée dans le journal d'audit.
+    </div>
+    <label><span id="pwLabelText">Mot de passe</span>
       <span class="pwfield"><input type="password" id="pw" required><button type="button" class="eye" data-target="pw" aria-label="Afficher le mot de passe" title="Afficher / masquer">👁</button></span>
     </label>
     <label id="pw2row" class="hidden">Confirmer le mot de passe
@@ -30,14 +33,19 @@
     <p id="pwWarn" class="warn hidden">Ce mot de passe chiffre toutes les données. S'il est perdu, elles sont <b>irrécupérables</b>. Notez-le dans un endroit sûr.</p>
     <p id="loginErr" class="error"></p>
     <button class="primary" id="loginBtn">Ouvrir</button>
-    <div id="loginVersion" style="text-align: center; color: var(--muted); font-size: 0.75rem; margin-top: 0.4rem;"></div>
+    <div id="adminToggleRow" style="text-align: center; margin-top: 0.2rem;">
+      <button type="button" id="toggleAdminBtn" style="background:none; border:none; color:var(--muted); font-size:0.83rem; text-decoration:underline; cursor:pointer; padding:0.2rem 0.5rem;">
+        🔒 Connexion Admin
+      </button>
+    </div>
+    <div id="loginVersion" style="text-align: center; color: var(--muted); font-size: 0.75rem; margin-top: 0.2rem;"></div>
   </form>
 </section>
 
 <section id="app" class="hidden">
   <header>
     <img src="logo.png" alt="Technosport" class="logo">
-    <h1>App de Pseudonymisation <small id="count"></small></h1>
+    <h1>App de Pseudonymisation <small id="count"></small> <span id="adminBadge" class="hidden" style="background:#b42318; color:#fff; font-size:0.75rem; padding:0.15rem 0.5rem; border-radius:4px; font-weight:600; vertical-align:middle; margin-left:0.5rem;">Secours Admin</span></h1>
     <input type="search" id="search" autocomplete="off" placeholder="Rechercher (nom, prénom, ID, code manip…)">
     <button class="primary hidden" id="updateBtn">Mise à jour disponible</button>
     <button class="primary" id="addBtn">+ Nouveau participant</button>
@@ -96,17 +104,17 @@
 
 <dialog id="pwDlg">
   <form id="pwForm" method="dialog" autocomplete="off">
-    <h2>Changer le mot de passe</h2>
-    <label>Mot de passe actuel
+    <h2 id="pwDlgTitle">Changer le mot de passe</h2>
+    <label id="oldPwRow">Mot de passe actuel
       <span class="pwfield"><input type="password" id="oldPw" required><button type="button" class="eye" data-target="oldPw" aria-label="Afficher le mot de passe" title="Afficher / masquer">👁</button></span>
     </label>
-    <label>Nouveau mot de passe (8 caractères min.)
+    <label><span id="newPwLabel">Nouveau mot de passe (8 caractères min.)</span>
       <span class="pwfield"><input type="password" id="newPw" required minlength="8"><button type="button" class="eye" data-target="newPw" aria-label="Afficher le mot de passe" title="Afficher / masquer">👁</button></span>
     </label>
     <p id="pwErr" class="error"></p>
     <div class="actions">
       <button type="button" id="pwCancel">Annuler</button>
-      <button class="primary">Changer</button>
+      <button class="primary" id="pwSubmitBtn">Changer</button>
     </div>
   </form>
 </dialog>

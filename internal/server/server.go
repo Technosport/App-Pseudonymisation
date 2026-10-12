@@ -175,6 +175,7 @@ func (s *Server) ping(w http.ResponseWriter, r *http.Request) {
 func (s *Server) state(w http.ResponseWriter, r *http.Request) {
 	state := "setup"
 	var titre, expNom, expPrenom, expEmail string
+	isAdmin := false
 
 	if store.Exists(s.DBPath) {
 		state = "locked"
@@ -190,6 +191,7 @@ func (s *Server) state(w http.ResponseWriter, r *http.Request) {
 		st := s.st
 		if st != nil && s.token != "" && subtle.ConstantTimeCompare([]byte(c.Value), []byte(s.token)) == 1 {
 			state = "unlocked"
+			isAdmin = st.IsAdmin()
 		} else {
 			st = nil
 		}
@@ -205,6 +207,7 @@ func (s *Server) state(w http.ResponseWriter, r *http.Request) {
 		"expNom":    expNom,
 		"expPrenom": expPrenom,
 		"expEmail":  expEmail,
+		"isAdmin":   isAdmin,
 	})
 }
 
@@ -229,6 +232,7 @@ type pwBody struct {
 	ExpNom    string `json:"expNom"`
 	ExpPrenom string `json:"expPrenom"`
 	ExpEmail  string `json:"expEmail"`
+	IsAdmin   bool   `json:"isAdmin"`
 }
 
 func decode(r *http.Request, v any) error {
@@ -276,23 +280,43 @@ func (s *Server) unlock(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if cur := s.store(); cur != nil {
-		if !cur.CheckPassword(b.Password) {
+		valid := false
+		if b.IsAdmin {
+			valid = cur.CheckAdminKey(b.Password)
+		} else {
+			valid = cur.CheckPassword(b.Password)
+		}
+		if !valid {
 			time.Sleep(time.Second)
-			writeErr(w, 401, store.ErrBadPassword.Error())
+			if b.IsAdmin {
+				writeErr(w, 401, store.ErrBadAdminKey.Error())
+			} else {
+				writeErr(w, 401, store.ErrBadPassword.Error())
+			}
 			return
 		}
 		if err := s.startSession(w, cur); err != nil {
 			writeErr(w, 500, err.Error())
 			return
 		}
-		writeJSON(w, 200, map[string]any{"ok": true})
+		writeJSON(w, 200, map[string]any{"ok": true, "isAdmin": cur.IsAdmin()})
 		return
 	}
-	st, err := store.Open(s.DBPath, b.Password)
+
+	var st *store.Store
+	var err error
+	if b.IsAdmin {
+		st, err = store.OpenAdmin(s.DBPath, b.Password)
+	} else {
+		st, err = store.Open(s.DBPath, b.Password)
+	}
+
 	if err != nil {
-		if errors.Is(err, store.ErrBadPassword) {
+		if errors.Is(err, store.ErrBadPassword) || errors.Is(err, store.ErrBadAdminKey) {
 			time.Sleep(time.Second)
 			writeErr(w, 401, err.Error())
+		} else if errors.Is(err, store.ErrLegacyFormat) {
+			writeErr(w, 400, err.Error())
 		} else {
 			writeErr(w, 500, err.Error())
 		}
@@ -307,7 +331,7 @@ func (s *Server) unlock(w http.ResponseWriter, r *http.Request) {
 		writeErr(w, 500, err.Error())
 		return
 	}
-	writeJSON(w, 200, map[string]any{"ok": true, "warning": warn})
+	writeJSON(w, 200, map[string]any{"ok": true, "warning": warn, "isAdmin": st.IsAdmin()})
 }
 
 func (s *Server) list(w http.ResponseWriter, r *http.Request) {
@@ -439,7 +463,16 @@ func (s *Server) password(w http.ResponseWriter, r *http.Request) {
 		writeErr(w, 400, "requête invalide")
 		return
 	}
-	if err := s.store().ChangePassword(b.Old, b.New); err != nil {
+	st := s.store()
+	if st.IsAdmin() {
+		if err := st.ResetPassword(b.New); err != nil {
+			writeErr(w, 400, err.Error())
+			return
+		}
+		writeJSON(w, 200, map[string]any{"ok": true})
+		return
+	}
+	if err := st.ChangePassword(b.Old, b.New); err != nil {
 		code := 400
 		if errors.Is(err, store.ErrBadPassword) {
 			code = 401

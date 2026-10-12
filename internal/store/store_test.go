@@ -1,6 +1,11 @@
 package store
 
 import (
+	"crypto/aes"
+	"crypto/cipher"
+	"crypto/rand"
+	"encoding/binary"
+	"encoding/json"
 	"errors"
 	"os"
 	"path/filepath"
@@ -222,5 +227,130 @@ func TestAge(t *testing.T) {
 	at := time.Date(2026, 3, 11, 0, 0, 0, 0, time.UTC)
 	if Age("1990-03-12", at) != 35 || Age("1990-03-11", at) != 36 {
 		t.Fatal("calcul d'âge")
+	}
+}
+
+func TestAdminRecovery(t *testing.T) {
+	s, path := newStore(t)
+	p, err := s.Add(sample(), false)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	validKeyFormatted := "TKSR-E975-17CB-FDEF-063E-A150-2884-666E-E36C-39B7-7156-76D0-74C4-649E-7E25-D926-51BA"
+	validKeyRaw := "e97517cbfdef063ea1502884666ee36c39b7715676d074c4649e7e25d92651ba"
+	wrongKey := "TKSR-0000-0000-0000-0000-0000-0000-0000-0000-0000-0000-0000-0000-0000-0000-0000-0000"
+
+	// 1. Wrong key fails
+	if _, err := OpenAdmin(path, wrongKey); err == nil {
+		t.Fatal("ouverture admin avec mauvaise clé acceptée à tort")
+	}
+
+	// 2. Open with formatted key
+	sAdmin, err := OpenAdmin(path, validKeyFormatted)
+	if err != nil {
+		t.Fatalf("OpenAdmin échoué: %v", err)
+	}
+	if !sAdmin.IsAdmin() {
+		t.Fatal("IsAdmin doit être vrai")
+	}
+	got, err := sAdmin.Get(p.ID)
+	if err != nil || got.Nom != "Dupont" {
+		t.Fatalf("participant non lu via admin: %v %+v", err, got)
+	}
+
+	// 3. Open with raw hex key
+	sAdmin2, err := OpenAdmin(path, validKeyRaw)
+	if err != nil {
+		t.Fatalf("OpenAdmin raw échoué: %v", err)
+	}
+	if !sAdmin2.IsAdmin() {
+		t.Fatal("IsAdmin doit être vrai")
+	}
+
+	// 4. Reset password as admin
+	if err := sAdmin.ResetPassword("nouveaumdp_chercheur"); err != nil {
+		t.Fatalf("ResetPassword échoué: %v", err)
+	}
+
+	// 5. Normal user opens with new password
+	sUserNew, err := Open(path, "nouveaumdp_chercheur")
+	if err != nil {
+		t.Fatalf("Open avec nouveau mdp réinitialisé échoué: %v", err)
+	}
+	if sUserNew.IsAdmin() {
+		t.Fatal("IsAdmin doit être faux pour user")
+	}
+	if len(sUserNew.List()) != 1 {
+		t.Fatal("participants perdus après réinitialisation")
+	}
+
+	// 6. Old user password no longer works
+	if _, err := Open(path, "motdepasse"); err == nil {
+		t.Fatal("ancien mot de passe utilisateur encore valide")
+	}
+}
+
+func TestV1MigrationToV2(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "legacy.pdb")
+	pw := "legacy_password"
+
+	// 1. Manually craft a genuine V1 file
+	h := headerV1{Time: 3, Mem: 64 * 1024, Threads: 4}
+	rand.Read(h.Salt[:])
+	key := deriveKey(pw, h.Salt[:], h.Time, h.Mem, h.Threads)
+	block, _ := aes.NewCipher(key)
+	gcm, _ := cipher.NewGCM(block)
+
+	hb := make([]byte, headerV1Size)
+	copy(hb[0:8], magicV1[:])
+	binary.BigEndian.PutUint32(hb[8:12], h.Time)
+	binary.BigEndian.PutUint32(hb[12:16], h.Mem)
+	hb[16] = h.Threads
+	copy(hb[17:], h.Salt[:])
+
+	nonce := make([]byte, gcm.NonceSize())
+	rand.Read(nonce)
+
+	p := sample()
+	p.ID = "LEGACY01"
+	d := data{Version: 1, Titre: "Base Ancienne", Participants: []Participant{p}}
+	plain, _ := json.Marshal(d)
+	out := append(hb, nonce...)
+	out = gcm.Seal(out, nonce, plain, hb)
+	if err := os.WriteFile(path, out, 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	validKeyFormatted := "TKSR-E975-17CB-FDEF-063E-A150-2884-666E-E36C-39B7-7156-76D0-74C4-649E-7E25-D926-51BA"
+
+	// 2. Opening V1 with admin key directly should inform user to open once with user password
+	if _, err := OpenAdmin(path, validKeyFormatted); !errors.Is(err, ErrLegacyFormat) {
+		t.Fatalf("attendu ErrLegacyFormat, obtenu %v", err)
+	}
+
+	// 3. User opens V1 with normal password -> transparent migration to V2!
+	s, err := Open(path, pw)
+	if err != nil {
+		t.Fatalf("Open v1 échoué: %v", err)
+	}
+	if len(s.List()) != 1 || s.List()[0].ID != "LEGACY01" {
+		t.Fatal("données altérées lors de la migration")
+	}
+
+	// 4. Verify file on disk is now V2
+	raw, _ := os.ReadFile(path)
+	if len(raw) < 8 || string(raw[:8]) != string(magicV2[:]) {
+		t.Fatal("le fichier sur disque devrait être au format V2")
+	}
+
+	// 5. Admin key can now open the migrated database!
+	sAdmin, err := OpenAdmin(path, validKeyFormatted)
+	if err != nil {
+		t.Fatalf("OpenAdmin sur base migrée échoué: %v", err)
+	}
+	if len(sAdmin.List()) != 1 || sAdmin.List()[0].ID != "LEGACY01" {
+		t.Fatal("données introuvables via admin sur base migrée")
 	}
 }

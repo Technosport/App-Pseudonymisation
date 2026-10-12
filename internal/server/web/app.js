@@ -1,7 +1,7 @@
 "use strict";
 const $ = (id) => document.getElementById(id);
 const H = { "X-Requested-With": "pseudonymisation" };
-let setupMode = false, anon = false, editingId = null, all = [];
+let setupMode = false, adminMode = false, isCurrentSessionAdmin = false, anon = false, editingId = null, all = [];
 
 async function api(method, url, body) {
   const opt = { method, headers: { ...H } };
@@ -17,9 +17,29 @@ async function api(method, url, body) {
 
 function show(id, on) { $(id).classList.toggle("hidden", !on); }
 
+function updateAdminUI() {
+  show("adminNotice", adminMode);
+  if (adminMode) {
+    $("loginTitle").textContent = "Connexion Secours Admin";
+    $("pwLabelText").textContent = "Clé de secours Administrateur";
+    $("pw").placeholder = "TKSR-... ou clé hexadécimale de 64 caractères";
+    $("loginBtn").textContent = "Déverrouiller la base";
+    $("toggleAdminBtn").textContent = "← Revenir à la connexion normale";
+  } else {
+    $("loginTitle").textContent = "App de Pseudonymisation";
+    $("pwLabelText").textContent = "Mot de passe";
+    $("pw").placeholder = "";
+    $("loginBtn").textContent = setupMode ? "Créer la base" : "Ouvrir";
+    $("toggleAdminBtn").textContent = "🔒 Connexion Admin";
+  }
+}
+
 function showLogin(setup, r) {
   setupMode = setup;
+  adminMode = false;
   show("login", true); show("app", false);
+  show("adminToggleRow", !setup);
+  updateAdminUI();
   $("loginHelp").textContent = setup
     ? "Première utilisation : choisissez un mot de passe (8 caractères minimum)."
     : "";
@@ -37,13 +57,20 @@ function showLogin(setup, r) {
   } else {
     $("metaDisplay").classList.add("hidden");
   }
-  $("loginBtn").textContent = setup ? "Créer la base" : "Ouvrir";
   $("pw").value = ""; $("pw2").value = ""; $("loginErr").textContent = "";
   if (r && r.version) {
     $("loginVersion").textContent = `v${r.version.replace(/^v/, '')}`;
   }
   if (setup) $("setupTitre").focus(); else $("pw").focus();
 }
+
+$("toggleAdminBtn").addEventListener("click", () => {
+  adminMode = !adminMode;
+  $("loginErr").textContent = "";
+  $("pw").value = "";
+  updateAdminUI();
+  $("pw").focus();
+});
 
 function notice(msg, bad) {
   const n = $("notice");
@@ -56,12 +83,14 @@ $("loginForm").addEventListener("submit", async (e) => {
   if (setupMode && $("pw").value !== $("pw2").value) { $("loginErr").textContent = "Les mots de passe ne correspondent pas."; return; }
   $("loginBtn").disabled = true;
   try {
-    const payload = { password: $("pw").value };
+    const payload = { password: $("pw").value.trim() };
     if (setupMode) {
       payload.titre = $("setupTitre").value;
       payload.expNom = $("setupNom").value;
       payload.expPrenom = $("setupPrenom").value;
       payload.expEmail = $("setupEmail").value;
+    } else {
+      payload.isAdmin = adminMode;
     }
     const r = await api("POST", setupMode ? "/api/setup" : "/api/unlock", payload);
     $("pw").value = ""; $("pw2").value = "";
@@ -108,9 +137,16 @@ async function enterApp() {
   show("login", false); show("app", true); notice("");
   try {
     const r = await fetch("/api/state").then((x) => x.json());
+    isCurrentSessionAdmin = !!r.isAdmin;
+    show("adminBadge", isCurrentSessionAdmin);
+    if (isCurrentSessionAdmin) {
+      $("pwBtn").textContent = "Réinitialiser mdp utilisateur";
+    } else {
+      $("pwBtn").textContent = "Changer le mot de passe";
+    }
     if (r.titre) {
       const h1 = document.querySelector("header h1");
-      if (h1) h1.innerHTML = r.titre + ' <small id="count"></small>';
+      if (h1) h1.innerHTML = r.titre + ' <small id="count"></small> <span id="adminBadge" class="' + (isCurrentSessionAdmin ? '' : 'hidden') + '" style="background:#b42318; color:#fff; font-size:0.75rem; padding:0.15rem 0.5rem; border-radius:4px; font-weight:600; vertical-align:middle; margin-left:0.5rem;">Secours Admin</span>';
       document.title = r.titre + ' - Participants';
     }
     if (r.version) {
@@ -306,14 +342,36 @@ $("backupBtn").onclick = async () => {
 
 $("anonBtn").onclick = () => { anon = !anon; $("anonState").textContent = anon ? "oui" : "non"; closeMenus(); render(all, all.length); refresh(); };
 
-$("pwBtn").onclick = () => { closeMenus(); $("pwForm").reset(); $("pwErr").textContent = ""; $("pwDlg").showModal(); };
+$("pwBtn").onclick = () => {
+  closeMenus();
+  $("pwForm").reset();
+  $("pwErr").textContent = "";
+  if (isCurrentSessionAdmin) {
+    $("pwDlgTitle").textContent = "Réinitialiser le mot de passe utilisateur";
+    show("oldPwRow", false);
+    $("oldPw").required = false;
+    $("pwSubmitBtn").textContent = "Réinitialiser";
+  } else {
+    $("pwDlgTitle").textContent = "Changer le mot de passe";
+    show("oldPwRow", true);
+    $("oldPw").required = true;
+    $("pwSubmitBtn").textContent = "Changer";
+  }
+  $("pwDlg").showModal();
+};
 $("pwCancel").onclick = () => $("pwDlg").close();
 $("pwForm").addEventListener("submit", async (e) => {
   e.preventDefault();
   try {
-    await api("POST", "/api/password", { old: $("oldPw").value, new: $("newPw").value });
+    const body = { new: $("newPw").value };
+    if (!isCurrentSessionAdmin) {
+      body.old = $("oldPw").value;
+    }
+    await api("POST", "/api/password", body);
     $("pwDlg").close();
-    notice("Mot de passe modifié. Les anciennes sauvegardes restent ouvrables avec l'ancien mot de passe.");
+    notice(isCurrentSessionAdmin
+      ? "Mot de passe utilisateur réinitialisé avec succès."
+      : "Mot de passe modifié. Les anciennes sauvegardes restent ouvrables avec l'ancien mot de passe.");
   } catch (err) { $("pwErr").textContent = err.message; }
 });
 

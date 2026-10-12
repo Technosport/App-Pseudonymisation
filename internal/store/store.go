@@ -2,7 +2,6 @@ package store
 
 import (
 	"crypto/rand"
-	"crypto/subtle"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -47,12 +46,14 @@ type data struct {
 const maxAudit = 5000
 
 type Store struct {
-	mu    sync.Mutex
-	path  string
-	key   []byte
-	hdr   header
-	d     data
-	dirty int
+	mu      sync.Mutex
+	path    string
+	dek     []byte
+	userKey []byte
+	hdr     headerV2
+	d       data
+	dirty   int
+	isAdmin bool
 }
 
 const idAlphabet = "ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789"
@@ -62,48 +63,191 @@ func Exists(path string) bool {
 	return err == nil
 }
 
-// Create initialise une nouvelle base chiffrée.
+// Create initialise une nouvelle base chiffrée avec double slot (utilisateur + admin).
 func Create(path, password, titre, expNom, expPrenom, expEmail string) (*Store, error) {
 	if Exists(path) {
 		return nil, ErrExists
 	}
-	h, err := newHeader()
+	if len(password) < 8 {
+		return nil, errors.New("le mot de passe doit contenir au moins 8 caractères")
+	}
+	dek := make([]byte, 32)
+	if _, err := rand.Read(dek); err != nil {
+		return nil, err
+	}
+	var salt [16]byte
+	if _, err := rand.Read(salt[:]); err != nil {
+		return nil, err
+	}
+	h := headerV2{
+		Time:     3,
+		Mem:      64 * 1024,
+		Threads:  4,
+		UserSalt: salt,
+	}
+	userKey := deriveKey(password, h.UserSalt[:], h.Time, h.Mem, h.Threads)
+	wrappedUser, err := wrapDEKForUser(userKey, dek)
 	if err != nil {
 		return nil, err
 	}
-	s := &Store{path: path, hdr: h, key: deriveKey(password, h), d: data{
-		Version:   1,
-		Titre:     titre,
-		ExpNom:    expNom,
-		ExpPrenom: expPrenom,
-		ExpEmail:  expEmail,
-	}}
+	h.UserWrappedDEK = wrappedUser
+
+	ephPub, wrappedAdmin, err := wrapDEKForAdmin(AdminPublicKeyHex, dek)
+	if err != nil {
+		return nil, err
+	}
+	h.AdminEphemPub = ephPub
+	h.AdminWrappedDEK = wrappedAdmin
+
+	s := &Store{
+		path:    path,
+		dek:     dek,
+		userKey: userKey,
+		hdr:     h,
+		d: data{
+			Version:   2,
+			Titre:     titre,
+			ExpNom:    expNom,
+			ExpPrenom: expPrenom,
+			ExpEmail:  expEmail,
+		},
+	}
 	if err := s.save(s.d); err != nil {
 		return nil, err
 	}
 	return s, nil
 }
 
-// Open ouvre et déchiffre une base existante.
+// Open ouvre et déchiffre une base existante avec le mot de passe utilisateur.
+// Si la base est au format V1, elle est automatiquement migrée au format V2 avec slot de secours.
 func Open(path, password string) (*Store, error) {
 	blob, err := os.ReadFile(path)
 	if err != nil {
 		return nil, err
 	}
-	h, err := parseHeader(blob)
+	if len(blob) < 8 {
+		return nil, errFormat
+	}
+
+	// Format V2 standard
+	if string(blob[:8]) == string(magicV2[:]) {
+		h, err := parseHeaderV2(blob)
+		if err != nil {
+			return nil, err
+		}
+		userKey := deriveKey(password, h.UserSalt[:], h.Time, h.Mem, h.Threads)
+		dek, err := unwrapDEKForUser(userKey, h.UserWrappedDEK)
+		if err != nil {
+			return nil, ErrBadPassword
+		}
+		plain, err := openV2(dek, blob)
+		if err != nil {
+			return nil, err
+		}
+		s := &Store{path: path, dek: dek, userKey: userKey, hdr: h}
+		if err := json.Unmarshal(plain, &s.d); err != nil {
+			return nil, errFormat
+		}
+		_ = os.Remove(path + ".tmp")
+		return s, nil
+	}
+
+	// Format V1 : migration automatique transparente vers V2
+	if string(blob[:8]) == string(magicV1[:]) {
+		h1, err := parseHeaderV1(blob)
+		if err != nil {
+			return nil, err
+		}
+		v1Key := deriveKey(password, h1.Salt[:], h1.Time, h1.Mem, h1.Threads)
+		plain, err := openV1(v1Key, blob)
+		if err != nil {
+			return nil, ErrBadPassword
+		}
+		var d data
+		if err := json.Unmarshal(plain, &d); err != nil {
+			return nil, errFormat
+		}
+
+		dek := make([]byte, 32)
+		if _, err := rand.Read(dek); err != nil {
+			return nil, err
+		}
+		var userSalt [16]byte
+		copy(userSalt[:], h1.Salt[:])
+		h2 := headerV2{
+			Time:     h1.Time,
+			Mem:      h1.Mem,
+			Threads:  h1.Threads,
+			UserSalt: userSalt,
+		}
+		userKey := deriveKey(password, h2.UserSalt[:], h2.Time, h2.Mem, h2.Threads)
+		wrappedUser, err := wrapDEKForUser(userKey, dek)
+		if err != nil {
+			return nil, err
+		}
+		h2.UserWrappedDEK = wrappedUser
+
+		ephPub, wrappedAdmin, err := wrapDEKForAdmin(AdminPublicKeyHex, dek)
+		if err != nil {
+			return nil, err
+		}
+		h2.AdminEphemPub = ephPub
+		h2.AdminWrappedDEK = wrappedAdmin
+
+		d.Version = 2
+		audit(&d, "migration", "", "Migration automatique vers le format v2 (clé de secours activée)")
+
+		s := &Store{path: path, dek: dek, userKey: userKey, hdr: h2, d: d, dirty: 1}
+		if err := s.save(s.d); err != nil {
+			return nil, fmt.Errorf("migration v2 impossible : %w", err)
+		}
+		_ = os.Remove(path + ".tmp")
+		return s, nil
+	}
+
+	return nil, errFormat
+}
+
+// OpenAdmin ouvre et déchiffre une base existante avec la clé de secours du Responsable Scientifique.
+func OpenAdmin(path, recoveryKey string) (*Store, error) {
+	keyBytes, err := ParseRecoveryKey(recoveryKey)
+	if err != nil {
+		return nil, fmt.Errorf("%w (%s)", ErrBadAdminKey, err.Error())
+	}
+	blob, err := os.ReadFile(path)
 	if err != nil {
 		return nil, err
 	}
-	key := deriveKey(password, h)
-	plain, err := open(key, blob)
+	if len(blob) < 8 {
+		return nil, errFormat
+	}
+	if string(blob[:8]) == string(magicV1[:]) {
+		return nil, ErrLegacyFormat
+	}
+	if string(blob[:8]) != string(magicV2[:]) {
+		return nil, errFormat
+	}
+	h, err := parseHeaderV2(blob)
 	if err != nil {
 		return nil, err
 	}
-	s := &Store{path: path, hdr: h, key: key}
+	dek, err := unwrapDEKForAdmin(keyBytes, h.AdminEphemPub[:], h.AdminWrappedDEK)
+	if err != nil {
+		return nil, ErrBadAdminKey
+	}
+	plain, err := openV2(dek, blob)
+	if err != nil {
+		return nil, err
+	}
+	s := &Store{path: path, dek: dek, hdr: h, isAdmin: true}
 	if err := json.Unmarshal(plain, &s.d); err != nil {
 		return nil, errFormat
 	}
 	_ = os.Remove(path + ".tmp")
+	_ = s.commit(func(d *data) error {
+		audit(d, "connexion_secours", "", "Accès de secours utilisé par le responsable scientifique")
+		return nil
+	})
 	return s, nil
 }
 
@@ -112,7 +256,7 @@ func (s *Store) save(d data) error {
 	if err != nil {
 		return err
 	}
-	blob, err := seal(s.key, s.hdr, plain)
+	blob, err := sealV2(s.dek, s.hdr, plain)
 	if err != nil {
 		return err
 	}
@@ -140,7 +284,6 @@ func writeAtomic(path string, blob []byte) error {
 }
 
 // commit applique mutate sur une copie, enregistre, puis remplace l'état en mémoire.
-// En cas d'échec d'écriture, l'état en mémoire reste inchangé.
 func (s *Store) commit(mutate func(d *data) error) error {
 	nd := data{
 		Version:      s.d.Version,
@@ -313,8 +456,8 @@ type ImportRecord struct {
 type ImportReport struct {
 	Added      int      `json:"added"`
 	Duplicates int      `json:"duplicates"`
-	NewIDs     int      `json:"newIds"`     // ID absent ou déjà pris : un nouvel ID a été généré
-	SamePerson int      `json:"samePerson"` // personne déjà présente, importée car son ID est différent
+	NewIDs     int      `json:"newIds"`
+	SamePerson int      `json:"samePerson"`
 	Errors     []string `json:"errors"`
 }
 
@@ -338,7 +481,6 @@ func (s *Store) Import(recs []ImportRecord) (ImportReport, error) {
 			p.ID = strings.ToUpper(strings.TrimSpace(r.P.ID))
 			validID := idPattern.MatchString(p.ID)
 			if seen[identityKey(p)] {
-				// Même identité : doublon, sauf si le fichier apporte un ID inédit à conserver.
 				if !validID || taken[p.ID] {
 					rep.Duplicates++
 					continue
@@ -389,34 +531,95 @@ func (s *Store) Audit(limit int) []AuditEntry {
 
 func (s *Store) CheckPassword(password string) bool {
 	s.mu.Lock()
-	h := s.hdr
-	key := s.key
-	s.mu.Unlock()
-	return subtle.ConstantTimeCompare(deriveKey(password, h), key) == 1
+	defer s.mu.Unlock()
+	userKey := deriveKey(password, s.hdr.UserSalt[:], s.hdr.Time, s.hdr.Mem, s.hdr.Threads)
+	_, err := unwrapDEKForUser(userKey, s.hdr.UserWrappedDEK)
+	return err == nil
 }
 
-// ChangePassword re-chiffre la base avec un nouveau mot de passe (nouveau sel).
+func (s *Store) CheckAdminKey(key string) bool {
+	keyBytes, err := ParseRecoveryKey(key)
+	if err != nil {
+		return false
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	_, err = unwrapDEKForAdmin(keyBytes, s.hdr.AdminEphemPub[:], s.hdr.AdminWrappedDEK)
+	return err == nil
+}
+
+// ChangePassword re-chiffre le slot utilisateur avec un nouveau mot de passe (sans toucher au slot admin).
 func (s *Store) ChangePassword(oldPw, newPw string) error {
-	if !s.CheckPassword(oldPw) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	oldKey := deriveKey(oldPw, s.hdr.UserSalt[:], s.hdr.Time, s.hdr.Mem, s.hdr.Threads)
+	if _, err := unwrapDEKForUser(oldKey, s.hdr.UserWrappedDEK); err != nil {
 		return ErrBadPassword
 	}
 	if len(newPw) < 8 {
 		return errors.New("le mot de passe doit contenir au moins 8 caractères")
 	}
-	h, err := newHeader()
+	var newSalt [16]byte
+	if _, err := rand.Read(newSalt[:]); err != nil {
+		return err
+	}
+	newUserKey := deriveKey(newPw, newSalt[:], s.hdr.Time, s.hdr.Mem, s.hdr.Threads)
+	wrappedUser, err := wrapDEKForUser(newUserKey, s.dek)
 	if err != nil {
 		return err
 	}
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	oldKey, oldHdr := s.key, s.hdr
-	s.key, s.hdr = deriveKey(newPw, h), h
+	oldHdr, oldUserKey := s.hdr, s.userKey
+	s.hdr.UserSalt = newSalt
+	s.hdr.UserWrappedDEK = wrappedUser
+	s.userKey = newUserKey
+	audit(&s.d, "changement_mdp", "", "")
 	if err := s.save(s.d); err != nil {
-		s.key, s.hdr = oldKey, oldHdr
+		s.hdr = oldHdr
+		s.userKey = oldUserKey
 		return err
 	}
 	s.dirty++
 	return nil
+}
+
+// ResetPassword permet au responsable scientifique de redéfinir le mot de passe utilisateur
+// sans avoir besoin de connaître l'ancien mot de passe.
+func (s *Store) ResetPassword(newPw string) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if !s.isAdmin {
+		return errors.New("seul l'administrateur peut réinitialiser le mot de passe sans l'ancien")
+	}
+	if len(newPw) < 8 {
+		return errors.New("le mot de passe doit contenir au moins 8 caractères")
+	}
+	var newSalt [16]byte
+	if _, err := rand.Read(newSalt[:]); err != nil {
+		return err
+	}
+	newUserKey := deriveKey(newPw, newSalt[:], s.hdr.Time, s.hdr.Mem, s.hdr.Threads)
+	wrappedUser, err := wrapDEKForUser(newUserKey, s.dek)
+	if err != nil {
+		return err
+	}
+	oldHdr, oldUserKey := s.hdr, s.userKey
+	s.hdr.UserSalt = newSalt
+	s.hdr.UserWrappedDEK = wrappedUser
+	s.userKey = newUserKey
+	audit(&s.d, "reinitialisation_mdp", "", "Mot de passe utilisateur réinitialisé par le responsable scientifique")
+	if err := s.save(s.d); err != nil {
+		s.hdr = oldHdr
+		s.userKey = oldUserKey
+		return err
+	}
+	s.dirty++
+	return nil
+}
+
+func (s *Store) IsAdmin() bool {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.isAdmin
 }
 
 // Dirty indique si des modifications ont été faites depuis l'ouverture.
