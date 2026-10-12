@@ -18,19 +18,19 @@ func printBanner(version, url string) {
 		return code
 	}
 
-	rst    := esc("\033[0m")
-	bold   := esc("\033[1m")
-	div    := esc("\033[38;2;90;100;115m")
-	sub    := esc("\033[38;2;180;185;195m")
-	logo   := esc("\033[1;38;2;255;255;255m")
+	rst := esc("\033[0m")
+	bold := esc("\033[1m")
+	div := esc("\033[38;2;90;100;115m")
+	sub := esc("\033[38;2;180;185;195m")
+	logo := esc("\033[1;38;2;255;255;255m")
 
 	// Cadre de statut
 	border := esc("\033[38;2;70;80;95m")
-	lbl    := esc("\033[38;2;150;155;170m")
-	val    := esc("\033[38;2;240;242;248m")
+	lbl := esc("\033[38;2;150;155;170m")
+	val := esc("\033[38;2;240;242;248m")
 	urlCol := esc("\033[1;38;2;56;189;248m")
-	green  := esc("\033[38;2;52;211;153m")
-	amber  := esc("\033[38;2;251;191;36m")
+	green := esc("\033[38;2;52;211;153m")
+	amber := esc("\033[38;2;251;191;36m")
 
 	fmt.Println()
 	// Logo officiel vectoriel amU | TECHNOSPORT reproduit fidèlement

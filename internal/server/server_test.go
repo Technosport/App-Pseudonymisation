@@ -224,4 +224,3 @@ func TestAdminUnlockFlow(t *testing.T) {
 		t.Fatalf("ouverture chercheur avec nouveau mdp refusée: %d", code)
 	}
 }
-

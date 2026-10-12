@@ -39,16 +39,16 @@ type Server struct {
 	CheckUpdate func() (any, error)
 	ApplyUpdate func(url string, onProgress func(step string, pct int)) error
 
-	mu             sync.Mutex
-	st             *store.Store
-	token          string
-	closed         bool
-	lastPing       time.Time
-	quit           chan struct{}
-	quitOnce       sync.Once
-	updateStep     string
-	updatePct      int
-	updateErr      string
+	mu         sync.Mutex
+	st         *store.Store
+	token      string
+	closed     bool
+	lastPing   time.Time
+	quit       chan struct{}
+	quitOnce   sync.Once
+	updateStep string
+	updatePct  int
+	updateErr  string
 }
 
 func New(dbPath, backupDir, version string) *Server {
@@ -259,7 +259,7 @@ func (s *Server) setup(w http.ResponseWriter, r *http.Request) {
 		writeErr(w, 409, err.Error())
 		return
 	}
-	
+
 	// Sauvegarde des métadonnées en clair pour l'écran de connexion
 	metaBytes, _ := json.Marshal(map[string]string{
 		"titre": b.Titre, "expNom": b.ExpNom, "expPrenom": b.ExpPrenom, "expEmail": b.ExpEmail,

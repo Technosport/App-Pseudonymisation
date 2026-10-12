@@ -26,8 +26,8 @@ var (
 )
 
 const (
-	headerV1Size = 8 + 4 + 4 + 1 + 16                                 // 33 octets
-	headerV2Size = 8 + 4 + 4 + 1 + 16 + 60 + 32 + 60                 // 185 octets
+	headerV1Size = 8 + 4 + 4 + 1 + 16                // 33 octets
+	headerV2Size = 8 + 4 + 4 + 1 + 16 + 60 + 32 + 60 // 185 octets
 )
 
 var (

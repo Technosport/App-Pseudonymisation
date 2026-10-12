@@ -78,7 +78,7 @@ func run(dataFlag string, noBrowser bool) error {
 	defer os.Remove(lockPath)
 
 	srv := server.New(filepath.Join(dataDir, "participants.pdb"), backupDir, version)
-	
+
 	// Inject update callbacks
 	appDirForUpdate := filepath.Dir(dataDir) // since dataDir is inside appDir
 	srv.CheckUpdate = func() (any, error) {

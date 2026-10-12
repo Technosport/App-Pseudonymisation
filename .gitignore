@@ -1,13 +1,62 @@
-dist/
+# ========================================================
+# Données locales de l'application (Confidentielles)
+# ========================================================
+data/
+backups/
+demo-db/
 *.pdb
 *.pdb.tmp
+.instance
+
+# Exports et données tabulaires
 *.xlsx
 *.xlsm
 *.csv
-data/
-backups/
-.instance
-demo-db/
+
+# Clés de secours et secrets locaux
+*.key
+*.pem
+secrets/
+*recovery_key*
+*cle_secours*
+
+# ========================================================
+# Binaires et artefacts de compilation
+# ========================================================
+dist/
+bin/
+build/
 *.exe
+*.exe~
+*.dll
+*.so
+*.dylib
 App-Pseudonymisation-TKS*
 preview_update.html
+*.zip
+*.tar.gz
+
+# Fichiers de test et couverture Go
+*.test
+*.out
+*.prof
+
+# ========================================================
+# Fichiers système et éditeurs
+# ========================================================
+# macOS
+.DS_Store
+.AppleDouble
+.LSOverride
+
+# Windows
+Thumbs.db
+ehthumbs.db
+Desktop.ini
+
+# IDE & Éditeurs
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
