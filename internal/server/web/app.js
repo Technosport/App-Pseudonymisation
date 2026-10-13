@@ -18,7 +18,6 @@ async function api(method, url, body) {
 function show(id, on) { $(id).classList.toggle("hidden", !on); }
 
 function updateAdminUI() {
-  show("adminNotice", adminMode);
   if (adminMode) {
     $("loginTitle").textContent = "Connexion Secours Admin";
     $("pwLabelText").textContent = "Clé de secours Administrateur";
