@@ -329,32 +329,78 @@ type ReleaseInfo struct {
 func CheckRemoteUpdate(currentVersion string) (*ReleaseInfo, error) {
 	client := http.Client{Timeout: 5 * time.Second}
 	req, err := http.NewRequest("GET", "https://api.github.com/repos/Technosport/App-Pseudonymisation/releases/latest", nil)
+	if err == nil {
+		req.Header.Set("User-Agent", "App-Pseudonymisation-TKS/"+currentVersion)
+		req.Header.Set("Accept", "application/vnd.github.v3+json")
+		resp, errDo := client.Do(req)
+		if errDo == nil && resp.StatusCode == 200 {
+			defer resp.Body.Close()
+			var release ReleaseInfo
+			if errJson := json.NewDecoder(resp.Body).Decode(&release); errJson == nil {
+				newVer := "v" + strings.TrimPrefix(release.TagName, "v")
+				currVer := "v" + strings.TrimPrefix(currentVersion, "v")
+				if currentVersion != "dev" && !isNewerVersion(currVer, newVer) {
+					return nil, nil // Déjà à jour
+				}
+				return &release, nil
+			}
+		}
+		if resp != nil {
+			resp.Body.Close()
+		}
+	}
+
+	// Fallback résilient sans quota d'API (utilise la redirection web HTTP 302 de GitHub /releases/latest)
+	return checkRemoteUpdateWebFallback(currentVersion)
+}
+
+func checkRemoteUpdateWebFallback(currentVersion string) (*ReleaseInfo, error) {
+	webClient := &http.Client{
+		CheckRedirect: func(req *http.Request, via []*http.Request) error {
+			return http.ErrUseLastResponse
+		},
+		Timeout: 5 * time.Second,
+	}
+	req, err := http.NewRequest("GET", "https://github.com/Technosport/App-Pseudonymisation/releases/latest", nil)
 	if err != nil {
 		return nil, err
 	}
-	resp, err := client.Do(req)
+	req.Header.Set("User-Agent", "Mozilla/5.0")
+	resp, err := webClient.Do(req)
 	if err != nil {
 		return nil, err
 	}
 	defer resp.Body.Close()
 
-	if resp.StatusCode != 200 {
-		return nil, fmt.Errorf("statut inattendu: %d", resp.StatusCode)
+	if resp.StatusCode == 301 || resp.StatusCode == 302 {
+		loc := resp.Header.Get("Location")
+		parts := strings.Split(strings.TrimRight(loc, "/"), "/")
+		if len(parts) > 0 {
+			tag := parts[len(parts)-1]
+			if strings.HasPrefix(tag, "v") {
+				newVer := tag
+				currVer := "v" + strings.TrimPrefix(currentVersion, "v")
+				if currentVersion != "dev" && !isNewerVersion(currVer, newVer) {
+					return nil, nil
+				}
+				zipURL := fmt.Sprintf("https://github.com/Technosport/App-Pseudonymisation/releases/download/%s/App-Pseudonymisation-TKS-%s.zip", tag, tag)
+				return &ReleaseInfo{
+					TagName: tag,
+					Body:    "Nouvelle version disponible.",
+					Assets: []struct {
+						Name               string `json:"name"`
+						BrowserDownloadURL string `json:"browser_download_url"`
+					}{
+						{
+							Name:               fmt.Sprintf("App-Pseudonymisation-TKS-%s.zip", tag),
+							BrowserDownloadURL: zipURL,
+						},
+					},
+				}, nil
+			}
+		}
 	}
-
-	var release ReleaseInfo
-	if err := json.NewDecoder(resp.Body).Decode(&release); err != nil {
-		return nil, err
-	}
-
-	newVer := "v" + strings.TrimPrefix(release.TagName, "v")
-	currVer := "v" + strings.TrimPrefix(currentVersion, "v")
-
-	if currentVersion != "dev" && !isNewerVersion(currVer, newVer) {
-		return nil, nil // Pas de nouvelle mise à jour
-	}
-
-	return &release, nil
+	return nil, nil
 }
 
 type ProgressWriter struct {
