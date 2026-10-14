@@ -2,6 +2,7 @@ package tabular
 
 import (
 	"bytes"
+	"strings"
 	"testing"
 	"time"
 
@@ -72,5 +73,50 @@ func TestPseudoExportHasNoIdentity(t *testing.T) {
 func TestBadHeaders(t *testing.T) {
 	if _, err := ParseParticipants([][]string{{"a", "b"}}); err == nil {
 		t.Fatal("en-têtes absents acceptés")
+	}
+}
+
+func TestPseudoRowsSortedByID(t *testing.T) {
+	ps := []store.Participant{
+		{ID: "ZZZZ9999", Nom: "Z", Prenom: "Z", Sexe: "Homme"},
+		{ID: "AAAA1111", Nom: "A", Prenom: "A", Sexe: "Femme"},
+		{ID: "MMMM5555", Nom: "M", Prenom: "M", Sexe: "Homme"},
+	}
+	rows := PseudoRows(ps, time.Now())
+	if len(rows) != 4 {
+		t.Fatalf("attendu 4 lignes (en-tête + 3 participants), obtenu %d", len(rows))
+	}
+	if rows[1][0] != "AAAA1111" || rows[2][0] != "MMMM5555" || rows[3][0] != "ZZZZ9999" {
+		t.Fatalf("l'export pseudonymisé n'est pas trié par ID alphabétique : %v, %v, %v", rows[1][0], rows[2][0], rows[3][0])
+	}
+}
+
+func TestCSVInjectionEscaping(t *testing.T) {
+	input := []store.Participant{
+		{ID: "INJ1", Nom: "=cmd|' /C calc'!A0", Prenom: "@SUM(1+1)", DateNaissance: "1990-01-01", Sexe: "Homme", CodeManip: "+TEST", Telephone: "-3300000000"},
+	}
+	var buf bytes.Buffer
+	if err := WriteCSV(&buf, FullRows(input)); err != nil {
+		t.Fatal(err)
+	}
+	out := buf.String()
+	// Vérifie que les caractères sensibles ont été préfixés par une apostrophe
+	for _, expected := range []string{"'=cmd", "'@SUM", "'+TEST", "'-3300000000"} {
+		if !strings.Contains(out, expected) {
+			t.Fatalf("le champ dangereux n'a pas été échappé : %s manquant dans :\n%s", expected, out)
+		}
+	}
+
+	// Vérifie que ParseParticipants déséchappe proprement
+	rows, err := ReadRows("inj.csv", buf.Bytes())
+	if err != nil {
+		t.Fatal(err)
+	}
+	recs, err := ParseParticipants(rows)
+	if err != nil || len(recs) != 1 {
+		t.Fatalf("erreur relecture CSV injecté : %v", err)
+	}
+	if recs[0].P.Nom != "=cmd|' /C calc'!A0" || recs[0].P.Prenom != "@SUM(1+1)" || recs[0].P.CodeManip != "+TEST" || recs[0].P.Telephone != "-3300000000" {
+		t.Fatalf("déséchappement incorrect : %+v", recs[0].P)
 	}
 }

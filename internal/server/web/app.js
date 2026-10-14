@@ -157,7 +157,11 @@ async function enterApp() {
 }
 
 function renderMarkdown(md) {
-  if (!md) return "<p>Améliorations diverses et corrections de bugs.</p>";
+  if (!md || md.trim() === "") return "<p>Améliorations diverses et corrections de bugs.</p>";
+  const clean = md.trim();
+  if (clean.startsWith("Full Changelog:") || clean.startsWith("* Full Changelog:") || clean.startsWith("## What's Changed\n\n* Full Changelog:")) {
+    return "<p><strong>Nouveautés et Améliorations :</strong></p><p>Mise à jour de sécurité et améliorations diverses.</p>";
+  }
   const lines = md.split("\n");
   let html = "";
   let inList = false;
@@ -167,7 +171,13 @@ function renderMarkdown(md) {
       if (inList) { html += "</ul>"; inList = false; }
       continue;
     }
-    // Titres
+    // Titres sans préfixe Markdown (ex: "Améliorations", "Nouveautés et Améliorations")
+    if (line === "Améliorations" || line === "Nouveautés" || line === "Nouveautés et Améliorations" || line.toLowerCase() === "nouveautés et améliorations") {
+      if (inList) { html += "</ul>"; inList = false; }
+      html += `<h3 style="margin:0.8rem 0 0.4rem 0; font-size:1.05rem; font-weight:600; color:var(--fg);">${line}</h3>`;
+      continue;
+    }
+    // Titres Markdown
     if (line.startsWith("### ")) {
       if (inList) { html += "</ul>"; inList = false; }
       html += `<h4 style="margin:0.8rem 0 0.3rem 0; font-size:1rem; color:var(--fg);">${formatInline(line.slice(4))}</h4>`;
@@ -178,10 +188,19 @@ function renderMarkdown(md) {
       html += `<h3 style="margin:0.9rem 0 0.4rem 0; font-size:1.1rem; color:var(--fg);">${formatInline(line.slice(3))}</h3>`;
       continue;
     }
-    // Puces
+    // Puces Markdown (* ou -)
     if (line.startsWith("* ") || line.startsWith("- ")) {
       if (!inList) { html += `<ul style="margin:0.3rem 0; padding-left:1.3rem;">`; inList = true; }
       html += `<li style="margin-bottom:0.25rem;">${formatInline(line.slice(2))}</li>`;
+      continue;
+    }
+    // Lignes de liste sans tiret (ex: "Indicateur de version : Description")
+    if (line.includes(" : ") && !line.startsWith("<") && !line.startsWith("http")) {
+      if (!inList) { html += `<ul style="margin:0.3rem 0; padding-left:1.3rem;">`; inList = true; }
+      const colonIdx = line.indexOf(" : ");
+      const label = line.slice(0, colonIdx);
+      const desc = line.slice(colonIdx + 3);
+      html += `<li style="margin-bottom:0.25rem;"><strong>${formatInline(label)}</strong> : ${formatInline(desc)}</li>`;
       continue;
     }
     // Ligne normale
@@ -254,6 +273,8 @@ async function doUpdate(info) {
           $("updateProgressBar").style.width = pct + "%";
           if (st.step === "download") {
             $("updateStatusText").textContent = `⏳ Téléchargement en cours... (${pct}%)`;
+          } else if (st.step === "verify") {
+            $("updateStatusText").textContent = `🔒 Vérification de la signature cryptographique Ed25519...`;
           } else if (st.step === "install") {
             $("updateStatusText").textContent = `⚙️ Installation et mise à jour des fichiers... (${pct}%)`;
           } else if (st.step === "done") {

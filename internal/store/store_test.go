@@ -3,8 +3,10 @@ package store
 import (
 	"crypto/aes"
 	"crypto/cipher"
+	"crypto/ecdh"
 	"crypto/rand"
 	"encoding/binary"
+	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"os"
@@ -352,5 +354,97 @@ func TestV1MigrationToV2(t *testing.T) {
 	}
 	if len(sAdmin.List()) != 1 || sAdmin.List()[0].ID != "LEGACY01" {
 		t.Fatal("données introuvables via admin sur base migrée")
+	}
+}
+
+func TestAdminRecoveryLegacySHA256Fallback(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "legacy_admin.pdb")
+	validKeyFormatted := "TKSR-E975-17CB-FDEF-063E-A150-2884-666E-E36C-39B7-7156-76D0-74C4-649E-7E25-D926-51BA"
+
+	// 1. Crée une base normale
+	st, err := Create(path, "motdepasse123", "Test Legacy Fallback", "A", "B", "a@b.fr")
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, err = st.Add(Participant{Nom: "LegacyAdmin", Prenom: "Jean", Sexe: "Homme"}, false)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	// 2. Ré-écrit le slot admin avec l'ancienne dérivation SHA-256 legacy
+	adminPubBytes, err := hex.DecodeString(AdminPublicKeyHex)
+	if err != nil {
+		t.Fatal(err)
+	}
+	adminPub, err := ecdh.X25519().NewPublicKey(adminPubBytes)
+	if err != nil {
+		t.Fatal(err)
+	}
+	ephPriv, err := ecdh.X25519().GenerateKey(rand.Reader)
+	if err != nil {
+		t.Fatal(err)
+	}
+	shared, err := ephPriv.ECDH(adminPub)
+	if err != nil {
+		t.Fatal(err)
+	}
+	legacyKEK := deriveAdminKEK_Legacy(shared)
+
+	// Chiffre la DEK avec legacyKEK
+	block, err := aes.NewCipher(legacyKEK)
+	if err != nil {
+		t.Fatal(err)
+	}
+	gcm, err := cipher.NewGCM(block)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var legacyWrapped [60]byte
+	nonce := legacyWrapped[:gcm.NonceSize()]
+	if _, err := rand.Read(nonce); err != nil {
+		t.Fatal(err)
+	}
+	gcm.Seal(legacyWrapped[gcm.NonceSize():gcm.NonceSize()], nonce, st.dek, nil)
+
+	var ephPub [32]byte
+	copy(ephPub[:], ephPriv.PublicKey().Bytes())
+
+	// Lit et déchiffre le payload d'origine avant modification de l'en-tête
+	blob, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	plain, err := openV2(st.dek, blob)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	// Modifie l'en-tête avec le slot legacy et re-scelle avec AAD
+	copy(blob[93:125], ephPub[:])
+	copy(blob[125:185], legacyWrapped[:])
+	h, err := parseHeaderV2(blob)
+	if err != nil {
+		t.Fatal(err)
+	}
+	newBlob, err := sealV2(st.dek, h, plain)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(path, newBlob, 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	// 3. Ouvre avec OpenAdmin : le déchiffrement HKDF va échouer et basculer sur le fallback Legacy SHA-256
+	sAdmin, err := OpenAdmin(path, validKeyFormatted)
+	if err != nil {
+		t.Fatalf("OpenAdmin sur base legacy admin a échoué : %v", err)
+	}
+	if !sAdmin.IsAdmin() {
+		t.Fatal("sAdmin doit être admin")
+	}
+	list := sAdmin.List()
+	if len(list) != 1 || list[0].Nom != "LegacyAdmin" {
+		t.Fatalf("données incorrectes après fallback legacy admin: %+v", list)
 	}
 }

@@ -58,17 +58,20 @@ func New(dbPath, backupDir, version string) *Server {
 // Quit retourne un canal fermé quand l'application doit s'arrêter.
 func (s *Server) Quit() <-chan struct{} { return s.quit }
 
-// Close sauvegarde si des modifications ont eu lieu pendant la session.
+// Close sauvegarde si des modifications ont eu lieu pendant la session, puis efface les clés en mémoire.
 func (s *Server) Close() error {
 	s.mu.Lock()
 	st, done := s.st, s.closed
 	s.closed = true
 	s.mu.Unlock()
+	var backupErr error
 	if st != nil && !done && st.Dirty() {
-		_, err := st.Backup(s.BackupDir)
-		return err
+		_, backupErr = st.Backup(s.BackupDir)
 	}
-	return nil
+	if st != nil {
+		st.Zeroize()
+	}
+	return backupErr
 }
 
 // WatchIdle arrête l'application si le navigateur n'envoie plus de signal de vie.

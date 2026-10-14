@@ -2,7 +2,10 @@ package main
 
 import (
 	"archive/zip"
+	"crypto/ed25519"
+	"encoding/hex"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"net/http"
@@ -13,6 +16,31 @@ import (
 	"strings"
 	"time"
 )
+
+// Clé publique Ed25519 officielle pour valider l'authenticité des mises à jour Technosport.
+// Seules les archives signées avec la clé privée correspondante (détenue par le responsable de publication)
+// peuvent être installées.
+const ReleasePublicKeyHex = "2b0ce5c1a0083d2cc6b5a92c5915aea284f60373208d445ca15dacf901974067"
+
+func verifyZipSignature(zipBytes, sigBytes []byte) error {
+	pubBytes, err := hex.DecodeString(ReleasePublicKeyHex)
+	if err != nil || len(pubBytes) != ed25519.PublicKeySize {
+		return errors.New("clé publique de vérification invalide dans le binaire")
+	}
+	// Accepte à la fois la signature brute (64 octets) ou encodée en hexadécimal (128 caractères)
+	cleanSig := sigBytes
+	if len(cleanSig) != ed25519.SignatureSize {
+		if decoded, errDec := hex.DecodeString(strings.TrimSpace(string(cleanSig))); errDec == nil && len(decoded) == ed25519.SignatureSize {
+			cleanSig = decoded
+		} else {
+			return fmt.Errorf("taille de signature invalide (%d octets, attendu %d)", len(sigBytes), ed25519.SignatureSize)
+		}
+	}
+	if !ed25519.Verify(pubBytes, zipBytes, cleanSig) {
+		return errors.New("mise à jour rejetée : signature cryptographique Ed25519 invalide ou corrompue")
+	}
+	return nil
+}
 
 var zipVersionRegex = regexp.MustCompile(`(?i)(?:participants|app-pseudonymisation-tks)[-_]v?(\d+\.\d+\.\d+(?:-[\w.]+)?)\.zip$`)
 
@@ -56,7 +84,31 @@ func checkAndApplyZipUpdate(appDir string, currentVersion string) {
 			}
 
 			zipPath := filepath.Join(absDir, name)
-			fmt.Printf("\n=== Mise à jour détectée : %s (version actuelle : %s) ===\n", newVer, currentVersion)
+
+			// Vérification de la signature cryptographique Ed25519
+			sigPath := zipPath + ".sig"
+			if _, err := os.Stat(sigPath); err != nil {
+				sigPath = strings.TrimSuffix(zipPath, filepath.Ext(zipPath)) + ".sig"
+			}
+			sigBytes, err := os.ReadFile(sigPath)
+			if err != nil {
+				if currentVersion != "dev" {
+					fmt.Printf("Mise à jour ignorée pour %s : fichier de signature manquant (.sig requis)\n\n", name)
+					continue
+				}
+			} else {
+				zipBytes, errZip := os.ReadFile(zipPath)
+				if errZip != nil {
+					fmt.Printf("Erreur lecture zip %s : %v\n\n", name, errZip)
+					continue
+				}
+				if errSig := verifyZipSignature(zipBytes, sigBytes); errSig != nil {
+					fmt.Printf("SÉCURITÉ : %v pour %s\n\n", errSig, name)
+					continue
+				}
+			}
+
+			fmt.Printf("\n=== Mise à jour authentifiée détectée : %s (version actuelle : %s) ===\n", newVer, currentVersion)
 			fmt.Println("Application de la mise à jour en cours...")
 
 			if err := applyZip(zipPath, appDir); err != nil {
@@ -64,9 +116,12 @@ func checkAndApplyZipUpdate(appDir string, currentVersion string) {
 				continue
 			}
 
-			// Renomme le zip pour ne pas le ré-appliquer indéfiniment
+			// Renomme le zip et la signature pour ne pas les ré-appliquer indéfiniment
 			doneName := filepath.Join(absDir, name+".installe")
 			_ = os.Rename(zipPath, doneName)
+			if sigBytes != nil {
+				_ = os.Rename(sigPath, sigPath+".installe")
+			}
 
 			fmt.Println("Mise à jour appliquée avec succès !")
 			fmt.Println("Les données (data/ et backups/) ont été intégralement préservées.")
@@ -117,8 +172,12 @@ func applyZip(zipFile, destDir string) error {
 
 	for _, f := range r.File {
 		// Normalise le chemin relatif dans le zip
-		// Souvent le zip contient un sous-dossier racine (ex: App-Pseudonymisation-TKS/...)
 		cleanPath := path.Clean(strings.ReplaceAll(f.Name, "\\", "/"))
+		if strings.HasPrefix(cleanPath, "..") || strings.Contains(cleanPath, "/../") || path.IsAbs(cleanPath) {
+			return fmt.Errorf("archive invalide : tentative d'évasion de répertoire détectée (%s)", f.Name)
+		}
+
+		// Souvent le zip contient un sous-dossier racine (ex: App-Pseudonymisation-TKS/...)
 		parts := strings.Split(cleanPath, "/")
 		if len(parts) > 1 {
 			// Retire le premier dossier englobant s'il existe
@@ -136,6 +195,14 @@ func applyZip(zipFile, destDir string) error {
 		}
 
 		targetPath := filepath.Join(destDir, rel)
+
+		// Protection Zip Slip : s'assurer que le chemin d'extraction reste confiné dans destDir
+		cleanDest := filepath.Clean(destDir)
+		cleanTarget := filepath.Clean(targetPath)
+		if !strings.HasPrefix(cleanTarget, cleanDest+string(filepath.Separator)) && cleanTarget != cleanDest {
+			return fmt.Errorf("archive invalide : tentative d'évasion de répertoire détectée (%s)", f.Name)
+		}
+
 		if f.FileInfo().IsDir() {
 			if err := os.MkdirAll(targetPath, 0o755); err != nil {
 				return err
@@ -146,7 +213,7 @@ func applyZip(zipFile, destDir string) error {
 		if err := extractFile(f, targetPath); err != nil {
 			return err
 		}
-		installedFiles[filepath.Clean(targetPath)] = true
+		installedFiles[cleanTarget] = true
 	}
 
 	// Nettoyage intelligent : supprime les anciens fichiers applicatifs obsolètes qui ne sont plus dans le zip
@@ -261,7 +328,7 @@ type ReleaseInfo struct {
 
 func CheckRemoteUpdate(currentVersion string) (*ReleaseInfo, error) {
 	client := http.Client{Timeout: 5 * time.Second}
-	req, err := http.NewRequest("GET", "https://api.github.com/repos/Technosport/Pseudonymisation/releases/latest", nil)
+	req, err := http.NewRequest("GET", "https://api.github.com/repos/Technosport/App-Pseudonymisation/releases/latest", nil)
 	if err != nil {
 		return nil, err
 	}
@@ -305,11 +372,34 @@ func (pw *ProgressWriter) Write(p []byte) (int, error) {
 	return n, nil
 }
 
+func downloadSignature(client *http.Client, zipURL string) ([]byte, error) {
+	urls := []string{zipURL + ".sig"}
+	if strings.HasSuffix(strings.ToLower(zipURL), ".zip") {
+		urls = append(urls, strings.TrimSuffix(zipURL, filepath.Ext(zipURL))+".sig")
+	}
+	for _, u := range urls {
+		resp, err := client.Get(u)
+		if err != nil {
+			continue
+		}
+		if resp.StatusCode != 200 {
+			resp.Body.Close()
+			continue
+		}
+		sig, err := io.ReadAll(io.LimitReader(resp.Body, 4096))
+		resp.Body.Close()
+		if err == nil && len(sig) > 0 {
+			return sig, nil
+		}
+	}
+	return nil, errors.New("signature cryptographique (.sig) introuvable sur GitHub Releases")
+}
+
 func ApplyRemoteUpdate(appDir string, downloadURL string, onProgress func(step string, pct int)) error {
 	if onProgress != nil {
 		onProgress("download", 0)
 	}
-	client := http.Client{Timeout: 5 * time.Minute}
+	client := &http.Client{Timeout: 5 * time.Minute}
 	resp, err := client.Get(downloadURL)
 	if err != nil {
 		return err
@@ -318,6 +408,11 @@ func ApplyRemoteUpdate(appDir string, downloadURL string, onProgress func(step s
 
 	if resp.StatusCode != 200 {
 		return fmt.Errorf("téléchargement échoué, statut: %d", resp.StatusCode)
+	}
+
+	const maxZipSize = int64(100 << 20) // 100 Mo max (protection DoS / OOM)
+	if resp.ContentLength > maxZipSize {
+		return fmt.Errorf("archive trop volumineuse (%d octets, max 100 Mo)", resp.ContentLength)
 	}
 
 	tmpFile := filepath.Join(os.TempDir(), "pseudonymisation-update.zip")
@@ -334,8 +429,8 @@ func ApplyRemoteUpdate(appDir string, downloadURL string, onProgress func(step s
 				pct := 0
 				if tot > 0 {
 					pct = int((down * 100) / tot)
-					if pct > 95 {
-						pct = 95
+					if pct > 90 {
+						pct = 90
 					}
 				}
 				onProgress("download", pct)
@@ -343,7 +438,8 @@ func ApplyRemoteUpdate(appDir string, downloadURL string, onProgress func(step s
 		},
 	}
 
-	if _, err := io.Copy(out, io.TeeReader(resp.Body, pw)); err != nil {
+	limitBody := io.LimitReader(resp.Body, maxZipSize)
+	if _, err := io.Copy(out, io.TeeReader(limitBody, pw)); err != nil {
 		out.Close()
 		os.Remove(tmpFile)
 		return err
@@ -353,6 +449,24 @@ func ApplyRemoteUpdate(appDir string, downloadURL string, onProgress func(step s
 		return err
 	}
 	defer os.Remove(tmpFile)
+
+	// Téléchargement et vérification obligatoire de la signature Ed25519
+	if onProgress != nil {
+		onProgress("verify", 92)
+	}
+	sigBytes, err := downloadSignature(client, downloadURL)
+	if err != nil {
+		return fmt.Errorf("sécurité : %w", err)
+	}
+
+	zipBytes, err := os.ReadFile(tmpFile)
+	if err != nil {
+		return fmt.Errorf("lecture archive impossible : %w", err)
+	}
+
+	if err := verifyZipSignature(zipBytes, sigBytes); err != nil {
+		return fmt.Errorf("sécurité : %w", err)
+	}
 
 	if onProgress != nil {
 		onProgress("install", 95)

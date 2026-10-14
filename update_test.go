@@ -2,6 +2,8 @@ package main
 
 import (
 	"archive/zip"
+	"crypto/ed25519"
+	"encoding/hex"
 	"os"
 	"path/filepath"
 	"testing"
@@ -135,5 +137,69 @@ func TestApplyZipCleansObsoleteFiles(t *testing.T) {
 	// Le fichier personnel de l'utilisateur doit être resté intact
 	if content, err := os.ReadFile(userDoc); err != nil || string(content) != "USER_DATA" {
 		t.Errorf("user personal file should be preserved, got err=%v", err)
+	}
+}
+
+func TestVerifyZipSignature(t *testing.T) {
+	// Clé privée correspondant à ReleasePublicKeyHex (utilisée uniquement pour le test unitaire)
+	privHex := "ed75ac1bc6e62c19d038ba820c527f72651872adbfd9a685abf265292b72ce8e2b0ce5c1a0083d2cc6b5a92c5915aea284f60373208d445ca15dacf901974067"
+	privBytes, err := hex.DecodeString(privHex)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	payload := []byte("TEST_ZIP_ARCHIVE_CONTENT_12345")
+	validSig := ed25519.Sign(privBytes, payload)
+
+	// Cas 1 : Signature brute valide
+	if err := verifyZipSignature(payload, validSig); err != nil {
+		t.Fatalf("échec vérification signature brute valide : %v", err)
+	}
+
+	// Cas 2 : Signature hexadécimale valide
+	sigHex := []byte(hex.EncodeToString(validSig))
+	if err := verifyZipSignature(payload, sigHex); err != nil {
+		t.Fatalf("échec vérification signature hexadécimale valide : %v", err)
+	}
+
+	// Cas 3 : Archive altérée / corrompue
+	tamperedPayload := []byte("TEST_ZIP_ARCHIVE_CONTENT_TAMPERED")
+	if err := verifyZipSignature(tamperedPayload, validSig); err == nil {
+		t.Fatal("sécurité compromise : l'archive altérée a été acceptée !")
+	}
+
+	// Cas 4 : Mauvaise signature
+	badSig := make([]byte, 64)
+	copy(badSig, validSig)
+	badSig[0] ^= 0xFF
+	if err := verifyZipSignature(payload, badSig); err == nil {
+		t.Fatal("sécurité compromise : la fausse signature a été acceptée !")
+	}
+}
+
+func TestApplyZipSlipProtection(t *testing.T) {
+	tmpDir := t.TempDir()
+	appDir := filepath.Join(tmpDir, "App")
+	_ = os.MkdirAll(appDir, 0o755)
+
+	zipPath := filepath.Join(tmpDir, "slip.zip")
+	zf, err := os.Create(zipPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	zw := zip.NewWriter(zf)
+
+	// Tentative de Zip Slip (traversée de répertoire)
+	f, err := zw.Create("App/../../escape.txt")
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, _ = f.Write([]byte("MALICIOUS"))
+	zw.Close()
+	zf.Close()
+
+	err = applyZip(zipPath, appDir)
+	if err == nil {
+		t.Fatal("sécurité compromise : le Zip Slip n'a pas été détecté !")
 	}
 }

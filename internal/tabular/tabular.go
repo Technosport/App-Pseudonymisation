@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"io"
 	"regexp"
+	"sort"
 	"strconv"
 	"strings"
 	"time"
@@ -31,9 +32,16 @@ func FullRows(ps []store.Participant) [][]string {
 }
 
 // PseudoRows exporte uniquement les données pseudonymisées (aucune donnée directement identifiante).
+// Les participants sont systématiquement triés par ordre alphabétique de leur ID
+// pour briser toute corrélation temporelle avec l'ordre d'arrivée au laboratoire.
 func PseudoRows(ps []store.Participant, at time.Time) [][]string {
+	sorted := append([]store.Participant(nil), ps...)
+	sort.Slice(sorted, func(i, j int) bool {
+		return sorted[i].ID < sorted[j].ID
+	})
+
 	rows := [][]string{PseudoHeader}
-	for _, p := range ps {
+	for _, p := range sorted {
 		age := ""
 		if a := store.Age(p.DateNaissance, at); a >= 0 {
 			age = strconv.Itoa(a)
@@ -44,6 +52,7 @@ func PseudoRows(ps []store.Participant, at time.Time) [][]string {
 }
 
 // WriteCSV écrit en UTF-8 avec BOM et séparateur « ; » (ouverture directe dans Excel en français).
+// Protège contre l'injection de formules (CSV Injection / DDE) pour les caractères =, @, +, -, \t, \r.
 func WriteCSV(w io.Writer, rows [][]string) error {
 	if _, err := w.Write([]byte{0xEF, 0xBB, 0xBF}); err != nil {
 		return err
@@ -53,7 +62,7 @@ func WriteCSV(w io.Writer, rows [][]string) error {
 	for _, r := range rows {
 		out := make([]string, len(r))
 		for i, c := range r {
-			if strings.HasPrefix(c, "=") || strings.HasPrefix(c, "@") {
+			if strings.HasPrefix(c, "=") || strings.HasPrefix(c, "@") || strings.HasPrefix(c, "+") || strings.HasPrefix(c, "-") || strings.HasPrefix(c, "\t") || strings.HasPrefix(c, "\r") {
 				c = "'" + c
 			}
 			out[i] = c
@@ -179,7 +188,11 @@ func ParseParticipants(rows [][]string) ([]store.ImportRecord, error) {
 	}
 	get := func(r []string, f string) string {
 		if j, ok := cols[f]; ok && j < len(r) {
-			return strings.TrimSpace(r[j])
+			val := strings.TrimSpace(r[j])
+			if len(val) > 1 && val[0] == '\'' && (val[1] == '=' || val[1] == '@' || val[1] == '+' || val[1] == '-' || val[1] == '\t' || val[1] == '\r') {
+				val = val[1:]
+			}
+			return val
 		}
 		return ""
 	}

@@ -21,6 +21,8 @@ Application portable pour enregistrer des participants à des expérimentations 
 * **Accès de secours (Responsable Scientifique)** : En cas de perte de mot de passe par un chercheur, le Responsable Scientifique peut déverrouiller la base via la clé de secours asymétrique (**Curve25519 / X25519**) et réinitialiser le mot de passe.
 * **Zéro fuite sur GitHub** : Seule la clé publique figure dans le dépôt. La clé de secours privée n'est jamais stockée dans le code.
 
+* **Politique de Sécurité & Conformité RGPD** : Consultez le document complet [SECURITY.md](SECURITY.md) pour la matrice d'audit DPO/RSSI et la checklist opérationnelle.
+
 Mode d'emploi complet : [package/README.txt](package/README.txt)
 
 ---
@@ -34,6 +36,7 @@ Dès qu'une nouvelle version est publiée, un bouton vert **« Mise à jour disp
 ## 🛠️ Structure du projet
 
 * [`cmd/keygen/`](cmd/keygen/) : Générateur autonome de paires de clés de secours (X25519).
+* [`cmd/signrelease/`](cmd/signrelease/) : Outil de signature cryptographique Ed25519 pour l'authentification des releases et mises à jour.
 * [`internal/store/`](internal/store/) : Moteur de stockage chiffré, dérivation de clés, double enveloppe et sauvegardes automatiques.
 * [`internal/server/`](internal/server/) : Serveur HTTP local, API REST et interface utilisateur Web (`web/`).
 * [`internal/tabular/`](internal/tabular/) : Analyseur et exportateur universel Excel (`.xlsx`) et CSV.

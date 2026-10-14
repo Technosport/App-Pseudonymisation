@@ -637,3 +637,20 @@ func (s *Store) Info() (titre, nom, prenom, email string) {
 	defer s.mu.Unlock()
 	return s.d.Titre, s.d.ExpNom, s.d.ExpPrenom, s.d.ExpEmail
 }
+
+func zeroize(b []byte) {
+	for i := range b {
+		b[i] = 0
+	}
+}
+
+// Zeroize efface explicitement les clés cryptographiques et les données déchiffrées en mémoire (DEK, KEK, participants).
+func (s *Store) Zeroize() {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	zeroize(s.dek)
+	zeroize(s.userKey)
+	s.dek = nil
+	s.userKey = nil
+	s.d = data{}
+}

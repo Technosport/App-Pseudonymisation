@@ -9,9 +9,11 @@ import (
 	"encoding/binary"
 	"encoding/hex"
 	"errors"
+	"io"
 	"strings"
 
 	"golang.org/x/crypto/argon2"
+	"golang.org/x/crypto/hkdf"
 )
 
 // Clé publique du Responsable Scientifique (Technosport).
@@ -163,6 +165,28 @@ func unwrapDEKForUser(userKey []byte, wrapped [60]byte) ([]byte, error) {
 	return dek, nil
 }
 
+func deriveAdminKEK_HKDF(sharedSecret, ephPub, adminPub []byte) ([]byte, error) {
+	// Lier les clés publiques dans le paramètre info (RFC 5869 / HPKE RFC 9180)
+	info := make([]byte, 0, len("Technosport-Recovery-v2")+len(ephPub)+len(adminPub))
+	info = append(info, []byte("Technosport-Recovery-v2")...)
+	info = append(info, ephPub...)
+	info = append(info, adminPub...)
+
+	reader := hkdf.New(sha256.New, sharedSecret, nil, info)
+	kek := make([]byte, 32)
+	if _, err := io.ReadFull(reader, kek); err != nil {
+		return nil, err
+	}
+	return kek, nil
+}
+
+func deriveAdminKEK_Legacy(sharedSecret []byte) []byte {
+	h := sha256.Sum256(append(sharedSecret, []byte("Technosport-Recovery-v2")...))
+	kek := make([]byte, 32)
+	copy(kek, h[:])
+	return kek
+}
+
 func deriveAdminSharedSecretFromPub(adminPubHex string) (ephPub [32]byte, aesKey []byte, err error) {
 	pubBytes, err := hex.DecodeString(adminPubHex)
 	if err != nil {
@@ -180,9 +204,15 @@ func deriveAdminSharedSecretFromPub(adminPubHex string) (ephPub [32]byte, aesKey
 	if err != nil {
 		return ephPub, nil, err
 	}
+	defer zeroize(shared)
 	copy(ephPub[:], ephPriv.PublicKey().Bytes())
-	h := sha256.Sum256(append(shared, []byte("Technosport-Recovery-v2")...))
-	return ephPub, h[:], nil
+
+	// Utilise la dérivation standardisée HKDF-SHA256
+	aesKey, err = deriveAdminKEK_HKDF(shared, ephPub[:], pubBytes)
+	if err != nil {
+		return ephPub, nil, err
+	}
+	return ephPub, aesKey, nil
 }
 
 func wrapDEKForAdmin(adminPubHex string, dek []byte) (ephPub [32]byte, wrapped [60]byte, err error) {
@@ -191,6 +221,7 @@ func wrapDEKForAdmin(adminPubHex string, dek []byte) (ephPub [32]byte, wrapped [
 	if err != nil {
 		return eph, out, err
 	}
+	defer zeroize(aesKey)
 	block, err := aes.NewCipher(aesKey)
 	if err != nil {
 		return eph, out, err
@@ -223,22 +254,46 @@ func unwrapDEKForAdmin(adminPrivBytes, ephemPubBytes []byte, wrapped [60]byte) (
 	if err != nil {
 		return nil, ErrBadAdminKey
 	}
-	h := sha256.Sum256(append(shared, []byte("Technosport-Recovery-v2")...))
-	block, err := aes.NewCipher(h[:])
+	defer zeroize(shared)
+
+	adminPubBytes, err := hex.DecodeString(AdminPublicKeyHex)
 	if err != nil {
 		return nil, ErrBadAdminKey
+	}
+
+	// 1. Tentative avec la nouvelle dérivation standardisée HKDF-SHA256
+	kekHKDF, errHKDF := deriveAdminKEK_HKDF(shared, ephemPubBytes, adminPubBytes)
+	if errHKDF == nil {
+		dek, errOpen := unwrapWithKEK(kekHKDF, wrapped)
+		zeroize(kekHKDF)
+		if errOpen == nil {
+			return dek, nil // Déchiffrement réussi avec HKDF
+		}
+	}
+
+	// 2. Fallback transparent pour les bases PSDB0002 créées avant la mise à jour (SHA-256 legacy)
+	kekLegacy := deriveAdminKEK_Legacy(shared)
+	defer zeroize(kekLegacy)
+	dek, errLegacy := unwrapWithKEK(kekLegacy, wrapped)
+	if errLegacy == nil {
+		return dek, nil
+	}
+
+	return nil, ErrBadAdminKey
+}
+
+func unwrapWithKEK(kek []byte, wrapped [60]byte) ([]byte, error) {
+	block, err := aes.NewCipher(kek)
+	if err != nil {
+		return nil, err
 	}
 	gcm, err := cipher.NewGCM(block)
 	if err != nil {
-		return nil, ErrBadAdminKey
+		return nil, err
 	}
 	nonce := wrapped[:gcm.NonceSize()]
 	ciphertext := wrapped[gcm.NonceSize():]
-	dek, err := gcm.Open(nil, nonce, ciphertext, nil)
-	if err != nil {
-		return nil, ErrBadAdminKey
-	}
-	return dek, nil
+	return gcm.Open(nil, nonce, ciphertext, nil)
 }
 
 func sealV2(dek []byte, h headerV2, plain []byte) ([]byte, error) {
