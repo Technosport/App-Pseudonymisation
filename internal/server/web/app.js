@@ -238,35 +238,39 @@ async function doUpdate(info) {
   $("updateStatusText").textContent = "⏳ Démarrage du téléchargement... (0%)";
 
   try {
-    const applyPromise = api("POST", "/api/update/apply", { url: asset.browser_download_url });
+    const r = await api("POST", "/api/update/apply", { url: asset.browser_download_url });
+    if (!r.ok) throw new Error("La mise à jour a échoué.");
 
-    // Scrute la progression toutes les 250ms
-    const pollInterval = setInterval(async () => {
-      try {
-        const st = await api("GET", "/api/update/status");
-        if (st.error) {
-          clearInterval(pollInterval);
-          throw new Error(st.error);
+    // L'API répond immédiatement : on attend la fin réelle via le statut
+    await new Promise((resolve, reject) => {
+      const pollInterval = setInterval(async () => {
+        try {
+          const st = await api("GET", "/api/update/status");
+          if (st.error) {
+            clearInterval(pollInterval);
+            return reject(new Error(st.error));
+          }
+          const pct = Math.min(100, Math.max(0, st.pct || 0));
+          $("updateProgressBar").style.width = pct + "%";
+          if (st.step === "download") {
+            $("updateStatusText").textContent = `⏳ Téléchargement en cours... (${pct}%)`;
+          } else if (st.step === "install") {
+            $("updateStatusText").textContent = `⚙️ Installation et mise à jour des fichiers... (${pct}%)`;
+          } else if (st.step === "done") {
+            $("updateStatusText").textContent = `✅ Installation terminée ! (100%)`;
+            clearInterval(pollInterval);
+            resolve();
+          }
+        } catch (_) {
+          // Serveur déjà fermé après la fin de la mise à jour : on considère que c'est terminé
+          // seulement si l'installation avait atteint 100 %.
         }
-        const pct = Math.min(100, Math.max(0, st.pct || 0));
-        $("updateProgressBar").style.width = pct + "%";
-        if (st.step === "download") {
-          $("updateStatusText").textContent = `⏳ Téléchargement en cours... (${pct}%)`;
-        } else if (st.step === "install") {
-          $("updateStatusText").textContent = `⚙️ Installation et mise à jour des fichiers... (${pct}%)`;
-        } else if (st.step === "done") {
-          $("updateStatusText").textContent = `✅ Installation terminée ! (100%)`;
-          clearInterval(pollInterval);
-        }
-      } catch (_) {}
-    }, 250);
+      }, 250);
+    });
 
-    const r = await applyPromise;
-    if (r.ok) {
-      setTimeout(() => {
-        document.body.innerHTML = "<div style='padding:2rem;text-align:center;'><h2>Mise à jour terminée avec succès !</h2><p>L'application a été fermée. Vous pouvez fermer cet onglet et relancer l'exécutable depuis votre clé USB.</p></div>";
-      }, 1000);
-    }
+    setTimeout(() => {
+      document.body.innerHTML = "<div style='padding:2rem;text-align:center;'><h2>Mise à jour terminée avec succès !</h2><p>L'application a été fermée. Vous pouvez fermer cet onglet et relancer l'exécutable depuis votre clé USB.</p></div>";
+    }, 1000);
   } catch (err) {
     $("updateError").textContent = err.message || "La mise à jour a échoué.";
     $("updateError").classList.remove("hidden");

@@ -82,8 +82,10 @@ func (s *Server) WatchIdle() {
 		case <-t.C:
 			s.mu.Lock()
 			idle := time.Since(s.lastPing)
+			updating := s.updateInProgressLocked()
 			s.mu.Unlock()
-			if idle > idleTimeout {
+			// Ne jamais arrêter l'application en pleine mise à jour (fermeture d'onglet, etc.)
+			if idle > idleTimeout && !updating {
 				s.quitOnce.Do(func() { close(s.quit) })
 				return
 			}
@@ -496,7 +498,19 @@ func (s *Server) backup(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, 200, map[string]any{"file": filepath.Base(p)})
 }
 
+// updateInProgressLocked indique si une mise à jour est en cours (s.mu doit être tenu).
+func (s *Server) updateInProgressLocked() bool {
+	return s.updateStep != "" && s.updateStep != "done" && s.updateErr == ""
+}
+
 func (s *Server) quitHandler(w http.ResponseWriter, r *http.Request) {
+	s.mu.Lock()
+	updating := s.updateInProgressLocked()
+	s.mu.Unlock()
+	if updating {
+		writeErr(w, 409, "Mise à jour en cours : patientez avant de quitter.")
+		return
+	}
 	err := s.Close()
 	msg := ""
 	if err != nil {
