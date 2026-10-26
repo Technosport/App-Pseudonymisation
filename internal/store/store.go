@@ -1,0 +1,690 @@
+package store
+
+import (
+	"crypto/rand"
+	"encoding/json"
+	"errors"
+	"fmt"
+	"math/big"
+	"os"
+	"sort"
+	"strings"
+	"sync"
+	"time"
+)
+
+var (
+	ErrBadPassword = errors.New("mot de passe incorrect")
+	ErrNotFound    = errors.New("participant introuvable")
+	ErrExists      = errors.New("une base existe déjà à cet emplacement")
+)
+
+// DuplicateError indique qu'un participant avec la même identité existe déjà.
+type DuplicateError struct{ IDs []string }
+
+func (e *DuplicateError) Error() string {
+	return "un participant avec le même nom, prénom et date de naissance existe déjà"
+}
+
+type AuditEntry struct {
+	Time   string `json:"time"`
+	Action string `json:"action"`
+	ID     string `json:"id,omitempty"`
+	Detail string `json:"detail,omitempty"`
+}
+
+type data struct {
+	ID           string        `json:"id,omitempty"`
+	Version      int           `json:"version"`
+	Titre        string        `json:"titre,omitempty"`
+	ExpNom       string        `json:"expNom,omitempty"`
+	ExpPrenom    string        `json:"expPrenom,omitempty"`
+	ExpEmail     string        `json:"expEmail,omitempty"`
+	Participants []Participant `json:"participants"`
+	Audit        []AuditEntry  `json:"audit"`
+}
+
+const maxAudit = 5000
+
+type Store struct {
+	mu      sync.Mutex
+	path    string
+	dek     []byte
+	userKey []byte
+	hdr     headerV2
+	d       data
+	dirty   int
+	isAdmin bool
+}
+
+const idAlphabet = "ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789"
+
+func Exists(path string) bool {
+	_, err := os.Stat(path)
+	return err == nil
+}
+
+// Create initialise une nouvelle base chiffrée avec double slot (utilisateur + admin).
+func Create(path, password, titre, expNom, expPrenom, expEmail string) (*Store, error) {
+	if Exists(path) {
+		return nil, ErrExists
+	}
+	if len(password) < 8 {
+		return nil, errors.New("le mot de passe doit contenir au moins 8 caractères")
+	}
+	dek := make([]byte, 32)
+	if _, err := rand.Read(dek); err != nil {
+		return nil, err
+	}
+	var salt [16]byte
+	if _, err := rand.Read(salt[:]); err != nil {
+		return nil, err
+	}
+	h := headerV2{
+		Time:     3,
+		Mem:      64 * 1024,
+		Threads:  4,
+		UserSalt: salt,
+	}
+	userKey := deriveKey(password, h.UserSalt[:], h.Time, h.Mem, h.Threads)
+	wrappedUser, err := wrapDEKForUser(userKey, dek)
+	if err != nil {
+		return nil, err
+	}
+	h.UserWrappedDEK = wrappedUser
+
+	ephPub, wrappedAdmin, err := wrapDEKForAdmin(AdminPublicKeyHex, dek)
+	if err != nil {
+		return nil, err
+	}
+	h.AdminEphemPub = ephPub
+	h.AdminWrappedDEK = wrappedAdmin
+
+	s := &Store{
+		path:    path,
+		dek:     dek,
+		userKey: userKey,
+		hdr:     h,
+		d: data{
+			ID:        newUUID(),
+			Version:   2,
+			Titre:     titre,
+			ExpNom:    expNom,
+			ExpPrenom: expPrenom,
+			ExpEmail:  expEmail,
+		},
+	}
+	audit(&s.d, "creation_base", "", "")
+	if err := s.save(s.d); err != nil {
+		return nil, err
+	}
+	return s, nil
+}
+
+// Open ouvre et déchiffre une base existante avec le mot de passe utilisateur.
+// Si la base est au format V1, elle est automatiquement migrée au format V2 avec slot de secours.
+func Open(path, password string) (*Store, error) {
+	blob, err := os.ReadFile(path)
+	if err != nil {
+		return nil, err
+	}
+	if len(blob) < 8 {
+		return nil, errFormat
+	}
+
+	// Format V2 standard
+	if string(blob[:8]) == string(magicV2[:]) {
+		h, err := parseHeaderV2(blob)
+		if err != nil {
+			return nil, err
+		}
+		userKey := deriveKey(password, h.UserSalt[:], h.Time, h.Mem, h.Threads)
+		dek, err := unwrapDEKForUser(userKey, h.UserWrappedDEK)
+		if err != nil {
+			return nil, ErrBadPassword
+		}
+		plain, err := openV2(dek, blob)
+		if err != nil {
+			return nil, err
+		}
+		s := &Store{path: path, dek: dek, userKey: userKey, hdr: h}
+		if err := json.Unmarshal(plain, &s.d); err != nil {
+			return nil, errFormat
+		}
+		if s.d.ID == "" {
+			s.d.ID = newUUID()
+			_ = s.save(s.d)
+		}
+		_ = os.Remove(path + ".tmp")
+		return s, nil
+	}
+
+	// Format V1 : migration automatique transparente vers V2
+	if string(blob[:8]) == string(magicV1[:]) {
+		h1, err := parseHeaderV1(blob)
+		if err != nil {
+			return nil, err
+		}
+		v1Key := deriveKey(password, h1.Salt[:], h1.Time, h1.Mem, h1.Threads)
+		plain, err := openV1(v1Key, blob)
+		if err != nil {
+			return nil, ErrBadPassword
+		}
+		var d data
+		if err := json.Unmarshal(plain, &d); err != nil {
+			return nil, errFormat
+		}
+
+		dek := make([]byte, 32)
+		if _, err := rand.Read(dek); err != nil {
+			return nil, err
+		}
+		var userSalt [16]byte
+		copy(userSalt[:], h1.Salt[:])
+		h2 := headerV2{
+			Time:     h1.Time,
+			Mem:      h1.Mem,
+			Threads:  h1.Threads,
+			UserSalt: userSalt,
+		}
+		userKey := deriveKey(password, h2.UserSalt[:], h2.Time, h2.Mem, h2.Threads)
+		wrappedUser, err := wrapDEKForUser(userKey, dek)
+		if err != nil {
+			return nil, err
+		}
+		h2.UserWrappedDEK = wrappedUser
+
+		ephPub, wrappedAdmin, err := wrapDEKForAdmin(AdminPublicKeyHex, dek)
+		if err != nil {
+			return nil, err
+		}
+		h2.AdminEphemPub = ephPub
+		h2.AdminWrappedDEK = wrappedAdmin
+
+		if d.ID == "" {
+			d.ID = newUUID()
+		}
+		d.Version = 2
+		audit(&d, "migration", "", "Migration automatique vers le format v2 (clé de secours activée)")
+
+		s := &Store{path: path, dek: dek, userKey: userKey, hdr: h2, d: d, dirty: 1}
+		if err := s.save(s.d); err != nil {
+			return nil, fmt.Errorf("migration v2 impossible : %w", err)
+		}
+		_ = os.Remove(path + ".tmp")
+		return s, nil
+	}
+
+	return nil, errFormat
+}
+
+// OpenAdmin ouvre et déchiffre une base existante avec la clé de secours du Responsable Scientifique.
+func OpenAdmin(path, recoveryKey string) (*Store, error) {
+	keyBytes, err := ParseRecoveryKey(recoveryKey)
+	if err != nil {
+		return nil, fmt.Errorf("%w (%s)", ErrBadAdminKey, err.Error())
+	}
+	blob, err := os.ReadFile(path)
+	if err != nil {
+		return nil, err
+	}
+	if len(blob) < 8 {
+		return nil, errFormat
+	}
+	if string(blob[:8]) == string(magicV1[:]) {
+		return nil, ErrLegacyFormat
+	}
+	if string(blob[:8]) != string(magicV2[:]) {
+		return nil, errFormat
+	}
+	h, err := parseHeaderV2(blob)
+	if err != nil {
+		return nil, err
+	}
+	dek, err := unwrapDEKForAdmin(keyBytes, h.AdminEphemPub[:], h.AdminWrappedDEK)
+	if err != nil {
+		return nil, ErrBadAdminKey
+	}
+	plain, err := openV2(dek, blob)
+	if err != nil {
+		return nil, err
+	}
+	s := &Store{path: path, dek: dek, hdr: h, isAdmin: true}
+	if err := json.Unmarshal(plain, &s.d); err != nil {
+		return nil, errFormat
+	}
+	if s.d.ID == "" {
+		s.d.ID = newUUID()
+	}
+	_ = os.Remove(path + ".tmp")
+	_ = s.commit(func(d *data) error {
+		audit(d, "connexion_secours", "", "Accès de secours utilisé par le responsable scientifique")
+		return nil
+	})
+	return s, nil
+}
+
+func (s *Store) save(d data) error {
+	plain, err := json.Marshal(d)
+	if err != nil {
+		return err
+	}
+	blob, err := sealV2(s.dek, s.hdr, plain)
+	if err != nil {
+		return err
+	}
+	return writeAtomic(s.path, blob)
+}
+
+func writeAtomic(path string, blob []byte) error {
+	tmp := path + ".tmp"
+	f, err := os.OpenFile(tmp, os.O_CREATE|os.O_WRONLY|os.O_TRUNC, 0o600)
+	if err != nil {
+		return err
+	}
+	if _, err := f.Write(blob); err != nil {
+		f.Close()
+		return err
+	}
+	if err := f.Sync(); err != nil {
+		f.Close()
+		return err
+	}
+	if err := f.Close(); err != nil {
+		return err
+	}
+	return os.Rename(tmp, path)
+}
+
+// commit applique mutate sur une copie, enregistre, puis remplace l'état en mémoire.
+func (s *Store) commit(mutate func(d *data) error) error {
+	nd := data{
+		ID:           s.d.ID,
+		Version:      s.d.Version,
+		Titre:        s.d.Titre,
+		ExpNom:       s.d.ExpNom,
+		ExpPrenom:    s.d.ExpPrenom,
+		ExpEmail:     s.d.ExpEmail,
+		Participants: append([]Participant(nil), s.d.Participants...),
+		Audit:        append([]AuditEntry(nil), s.d.Audit...),
+	}
+	if err := mutate(&nd); err != nil {
+		return err
+	}
+	if len(nd.Audit) > maxAudit {
+		nd.Audit = nd.Audit[len(nd.Audit)-maxAudit:]
+	}
+	if err := s.save(nd); err != nil {
+		return fmt.Errorf("écriture impossible : %w", err)
+	}
+	s.d = nd
+	s.dirty++
+	return nil
+}
+
+// SetInfo met à jour les métadonnées de la base.
+func (s *Store) SetInfo(titre, nom, prenom, email string) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.commit(func(d *data) error {
+		d.Titre = titre
+		d.ExpNom = nom
+		d.ExpPrenom = prenom
+		d.ExpEmail = email
+		return nil
+	})
+}
+
+func now() string   { return time.Now().Format(time.RFC3339) }
+func today() string { return time.Now().Format("2006-01-02") }
+
+func audit(d *data, action, id, detail string) {
+	d.Audit = append(d.Audit, AuditEntry{Time: now(), Action: action, ID: id, Detail: detail})
+}
+
+func newID(taken map[string]bool) (string, error) {
+	for {
+		b := make([]byte, 8)
+		for i := range b {
+			n, err := rand.Int(rand.Reader, big.NewInt(int64(len(idAlphabet))))
+			if err != nil {
+				return "", err
+			}
+			b[i] = idAlphabet[n.Int64()]
+		}
+		if id := string(b); !taken[id] {
+			return id, nil
+		}
+	}
+}
+
+func newUUID() string {
+	var b [16]byte
+	_, _ = rand.Read(b[:])
+	b[6] = (b[6] & 0x0f) | 0x40
+	b[8] = (b[8] & 0x3f) | 0x80
+	return fmt.Sprintf("%08x-%04x-%04x-%04x-%012x", b[0:4], b[4:6], b[6:8], b[8:10], b[10:16])
+}
+
+func idSet(ps []Participant) map[string]bool {
+	m := make(map[string]bool, len(ps))
+	for _, p := range ps {
+		m[p.ID] = true
+	}
+	return m
+}
+
+func duplicates(ps []Participant, p Participant, exceptID string) []string {
+	k := identityKey(p)
+	var ids []string
+	for _, q := range ps {
+		if q.ID != exceptID && identityKey(q) == k {
+			ids = append(ids, q.ID)
+		}
+	}
+	return ids
+}
+
+func (s *Store) List() []Participant {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return append([]Participant(nil), s.d.Participants...)
+}
+
+func (s *Store) Get(id string) (Participant, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	for _, p := range s.d.Participants {
+		if p.ID == id {
+			return p, nil
+		}
+	}
+	return Participant{}, ErrNotFound
+}
+
+// Add ajoute un participant. Sans force, un doublon d'identité renvoie *DuplicateError.
+func (s *Store) Add(p Participant, force bool) (Participant, error) {
+	p, err := Normalize(p)
+	if err != nil {
+		return p, err
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if ids := duplicates(s.d.Participants, p, ""); len(ids) > 0 && !force {
+		return p, &DuplicateError{IDs: ids}
+	}
+	err = s.commit(func(d *data) error {
+		id, err := newID(idSet(d.Participants))
+		if err != nil {
+			return err
+		}
+		p.ID = id
+		p.DateAjout = today()
+		p.ModifieLe = ""
+		d.Participants = append(d.Participants, p)
+		audit(d, "ajout", id, "")
+		return nil
+	})
+	return p, err
+}
+
+// Update modifie un participant existant (l'ID et la date d'ajout sont conservés).
+func (s *Store) Update(id string, p Participant, force bool) (Participant, error) {
+	p, err := Normalize(p)
+	if err != nil {
+		return p, err
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if ids := duplicates(s.d.Participants, p, id); len(ids) > 0 && !force {
+		return p, &DuplicateError{IDs: ids}
+	}
+	err = s.commit(func(d *data) error {
+		for i := range d.Participants {
+			if d.Participants[i].ID == id {
+				p.ID = id
+				p.DateAjout = d.Participants[i].DateAjout
+				p.ModifieLe = today()
+				d.Participants[i] = p
+				audit(d, "modification", id, "")
+				return nil
+			}
+		}
+		return ErrNotFound
+	})
+	return p, err
+}
+
+func (s *Store) Delete(id string) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.commit(func(d *data) error {
+		for i := range d.Participants {
+			if d.Participants[i].ID == id {
+				d.Participants = append(d.Participants[:i], d.Participants[i+1:]...)
+				audit(d, "suppression", id, "")
+				return nil
+			}
+		}
+		return ErrNotFound
+	})
+}
+
+type ImportRecord struct {
+	Row int
+	P   Participant
+}
+
+type ImportReport struct {
+	Added      int      `json:"added"`
+	Duplicates int      `json:"duplicates"`
+	NewIDs     int      `json:"newIds"`
+	SamePerson int      `json:"samePerson"`
+	Errors     []string `json:"errors"`
+}
+
+// Import ajoute des participants en une seule écriture. Les doublons d'identité sont ignorés.
+func (s *Store) Import(recs []ImportRecord) (ImportReport, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	rep := ImportReport{Errors: []string{}}
+	err := s.commit(func(d *data) error {
+		taken := idSet(d.Participants)
+		seen := map[string]bool{}
+		for _, p := range d.Participants {
+			seen[identityKey(p)] = true
+		}
+		for _, r := range recs {
+			p, err := normalize(r.P, true)
+			if err != nil {
+				rep.Errors = append(rep.Errors, fmt.Sprintf("ligne %d : %v", r.Row, err))
+				continue
+			}
+			p.ID = strings.ToUpper(strings.TrimSpace(r.P.ID))
+			validID := idPattern.MatchString(p.ID)
+			if seen[identityKey(p)] {
+				if !validID || taken[p.ID] {
+					rep.Duplicates++
+					continue
+				}
+				rep.SamePerson++
+			}
+			if !validID || taken[p.ID] {
+				id, err := newID(taken)
+				if err != nil {
+					return err
+				}
+				p.ID = id
+				rep.NewIDs++
+			}
+			if d2, err := ParseDate(r.P.DateAjout); err == nil {
+				p.DateAjout = d2
+			} else {
+				p.DateAjout = today()
+			}
+			p.ModifieLe = ""
+			taken[p.ID] = true
+			seen[identityKey(p)] = true
+			d.Participants = append(d.Participants, p)
+			rep.Added++
+		}
+		if rep.Added > 0 {
+			audit(d, "import", "", fmt.Sprintf("%d participants", rep.Added))
+		}
+		return nil
+	})
+	if err != nil {
+		return ImportReport{Errors: []string{}}, err
+	}
+	return rep, nil
+}
+
+func (s *Store) Audit(limit int) []AuditEntry {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	a := s.d.Audit
+	if limit > 0 && len(a) > limit {
+		a = a[len(a)-limit:]
+	}
+	out := append([]AuditEntry(nil), a...)
+	sort.SliceStable(out, func(i, j int) bool { return out[i].Time > out[j].Time })
+	return out
+}
+
+func (s *Store) CheckPassword(password string) bool {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	userKey := deriveKey(password, s.hdr.UserSalt[:], s.hdr.Time, s.hdr.Mem, s.hdr.Threads)
+	_, err := unwrapDEKForUser(userKey, s.hdr.UserWrappedDEK)
+	return err == nil
+}
+
+func (s *Store) CheckAdminKey(key string) bool {
+	keyBytes, err := ParseRecoveryKey(key)
+	if err != nil {
+		return false
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	_, err = unwrapDEKForAdmin(keyBytes, s.hdr.AdminEphemPub[:], s.hdr.AdminWrappedDEK)
+	return err == nil
+}
+
+// ChangePassword re-chiffre le slot utilisateur avec un nouveau mot de passe (sans toucher au slot admin).
+func (s *Store) ChangePassword(oldPw, newPw string) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	oldKey := deriveKey(oldPw, s.hdr.UserSalt[:], s.hdr.Time, s.hdr.Mem, s.hdr.Threads)
+	if _, err := unwrapDEKForUser(oldKey, s.hdr.UserWrappedDEK); err != nil {
+		return ErrBadPassword
+	}
+	if len(newPw) < 8 {
+		return errors.New("le mot de passe doit contenir au moins 8 caractères")
+	}
+	var newSalt [16]byte
+	if _, err := rand.Read(newSalt[:]); err != nil {
+		return err
+	}
+	newUserKey := deriveKey(newPw, newSalt[:], s.hdr.Time, s.hdr.Mem, s.hdr.Threads)
+	wrappedUser, err := wrapDEKForUser(newUserKey, s.dek)
+	if err != nil {
+		return err
+	}
+	oldHdr, oldUserKey := s.hdr, s.userKey
+	s.hdr.UserSalt = newSalt
+	s.hdr.UserWrappedDEK = wrappedUser
+	s.userKey = newUserKey
+	audit(&s.d, "changement_mdp", "", "")
+	if err := s.save(s.d); err != nil {
+		s.hdr = oldHdr
+		s.userKey = oldUserKey
+		return err
+	}
+	s.dirty++
+	return nil
+}
+
+// ResetPassword permet au responsable scientifique de redéfinir le mot de passe utilisateur
+// sans avoir besoin de connaître l'ancien mot de passe.
+func (s *Store) ResetPassword(newPw string) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if !s.isAdmin {
+		return errors.New("seul l'administrateur peut réinitialiser le mot de passe sans l'ancien")
+	}
+	if len(newPw) < 8 {
+		return errors.New("le mot de passe doit contenir au moins 8 caractères")
+	}
+	var newSalt [16]byte
+	if _, err := rand.Read(newSalt[:]); err != nil {
+		return err
+	}
+	newUserKey := deriveKey(newPw, newSalt[:], s.hdr.Time, s.hdr.Mem, s.hdr.Threads)
+	wrappedUser, err := wrapDEKForUser(newUserKey, s.dek)
+	if err != nil {
+		return err
+	}
+	oldHdr, oldUserKey := s.hdr, s.userKey
+	s.hdr.UserSalt = newSalt
+	s.hdr.UserWrappedDEK = wrappedUser
+	s.userKey = newUserKey
+	audit(&s.d, "reinitialisation_mdp", "", "Mot de passe utilisateur réinitialisé par le responsable scientifique")
+	if err := s.save(s.d); err != nil {
+		s.hdr = oldHdr
+		s.userKey = oldUserKey
+		return err
+	}
+	s.dirty++
+	return nil
+}
+
+func (s *Store) IsAdmin() bool {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.isAdmin
+}
+
+// Dirty indique si des modifications ont été faites depuis l'ouverture.
+func (s *Store) Dirty() bool {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.dirty > 0
+}
+
+func (s *Store) Path() string { return s.path }
+
+// Info renvoie les métadonnées de la base (titre, nom, prénom, email).
+func (s *Store) Info() (titre, nom, prenom, email string) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.d.Titre, s.d.ExpNom, s.d.ExpPrenom, s.d.ExpEmail
+}
+
+func (s *Store) ID() string {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.d.ID
+}
+
+func (s *Store) Count() int {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return len(s.d.Participants)
+}
+
+func zeroize(b []byte) {
+	for i := range b {
+		b[i] = 0
+	}
+}
+
+// Zeroize efface explicitement les clés cryptographiques et les données déchiffrées en mémoire (DEK, KEK, participants).
+func (s *Store) Zeroize() {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	zeroize(s.dek)
+	zeroize(s.userKey)
+	s.dek = nil
+	s.userKey = nil
+	s.d = data{}
+}

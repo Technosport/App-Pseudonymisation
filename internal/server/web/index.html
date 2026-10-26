@@ -1,0 +1,147 @@
+<!doctype html>
+<html lang="fr">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>App de Pseudonymisation – Participants</title>
+<link rel="stylesheet" href="app.css">
+<link rel="icon" type="image/png" href="favicon.png">
+</head>
+<body>
+
+<section id="login" class="center hidden">
+  <form id="loginForm" class="card" autocomplete="off">
+    <img src="logo.png" alt="Technosport" class="logo-big">
+    <h1 id="loginTitle" style="text-align: center;">App de Pseudonymisation</h1>
+    <p id="loginHelp"></p>
+    <div id="metaDisplay" class="hidden" style="text-align: left; margin-bottom: 1rem; color: var(--muted); font-size: 0.95em; background: #eef1f5; padding: 1rem 1.2rem; border-radius: 6px;"></div>
+    <div id="setupFields" class="hidden" style="display:grid; gap:.8rem; margin-bottom:.5rem;">
+      <label>Titre de la base de pseudonymisation <input type="text" id="setupTitre" autocomplete="nope"></label>
+      <label>Nom du responsable <input type="text" id="setupNom" autocomplete="nope"></label>
+      <label>Prénom du responsable <input type="text" id="setupPrenom" autocomplete="nope"></label>
+      <label>E-mail du responsable <input type="email" id="setupEmail" autocomplete="nope"></label>
+    </div>
+    <label><span id="pwLabelText">Mot de passe</span>
+      <span class="pwfield"><input type="password" id="pw" required><button type="button" class="eye" data-target="pw" aria-label="Afficher le mot de passe" title="Afficher / masquer">👁</button></span>
+    </label>
+    <label id="pw2row" class="hidden">Confirmer le mot de passe
+      <span class="pwfield"><input type="password" id="pw2"><button type="button" class="eye" data-target="pw2" aria-label="Afficher le mot de passe" title="Afficher / masquer">👁</button></span>
+    </label>
+    <p id="pwWarn" class="warn hidden">Ce mot de passe chiffre toutes les données. S'il est perdu, elles sont <b>irrécupérables</b>. Notez-le dans un endroit sûr.</p>
+    <p id="loginErr" class="error"></p>
+    <button class="primary" id="loginBtn">Ouvrir</button>
+    <div id="adminToggleRow" style="text-align: center; margin-top: 0.2rem;">
+      <button type="button" id="toggleAdminBtn" style="background:none; border:none; color:var(--muted); font-size:0.83rem; text-decoration:underline; cursor:pointer; padding:0.2rem 0.5rem;">
+        🔒 Connexion Admin
+      </button>
+    </div>
+    <div id="loginVersion" style="text-align: center; color: var(--muted); font-size: 0.75rem; margin-top: 0.2rem;"></div>
+  </form>
+</section>
+
+<section id="app" class="hidden">
+  <header>
+    <img src="logo.png" alt="Technosport" class="logo">
+    <h1>App de Pseudonymisation <small id="count"></small> <span id="adminBadge" class="hidden" style="background:#b42318; color:#fff; font-size:0.75rem; padding:0.15rem 0.5rem; border-radius:4px; font-weight:600; vertical-align:middle; margin-left:0.5rem;">Secours Admin</span></h1>
+    <input type="search" id="search" autocomplete="off" placeholder="Rechercher (nom, prénom, ID, code manip…)">
+    <button class="primary hidden" id="updateBtn">Mise à jour disponible</button>
+    <button class="primary" id="addBtn">+ Nouveau participant</button>
+    <button id="importBtn">Importer</button>
+    <details class="menu"><summary>Exporter</summary>
+      <div>
+        <a href="/api/export?mode=full&format=xlsx">Complet (Excel)</a>
+        <a href="/api/export?mode=full&format=csv">Complet (CSV)</a>
+        <a href="/api/export?mode=pseudo&format=xlsx">Pseudonymisé (Excel)</a>
+        <a href="/api/export?mode=pseudo&format=csv">Pseudonymisé (CSV)</a>
+      </div>
+    </details>
+    <details class="menu"><summary>Plus</summary>
+      <div>
+        <button id="backupBtn">Sauvegarder maintenant</button>
+        <button id="auditBtn">Journal des modifications</button>
+        <button id="pwBtn">Changer le mot de passe</button>
+        <button id="anonBtn">Masquer l'identité : <span id="anonState">non</span></button>
+      </div>
+    </details>
+    <button id="quitBtn">Quitter</button>
+    <input type="file" id="file" accept=".xlsx,.xlsm,.csv" class="hidden">
+  </header>
+  <div id="notice" class="notice hidden"></div>
+  <div class="tablewrap"><table>
+    <thead><tr id="thead"></tr></thead>
+    <tbody id="rows"></tbody>
+  </table></div>
+  <p id="empty" class="muted hidden">Aucun participant.</p>
+  <footer id="appFooter" style="text-align: center; padding: 1.2rem; color: var(--muted); font-size: 0.8rem; border-top: 1px solid var(--line); margin-top: 2rem;">
+    Technosport AMU · <span id="appVersion"></span>
+  </footer>
+</section>
+
+<dialog id="formDlg">
+  <form id="pForm" method="dialog" autocomplete="off">
+    <h2 id="formTitle"></h2>
+    <div class="grid">
+      <label>Nom * <input name="nom" required></label>
+      <label>Prénom * <input name="prenom" required></label>
+      <label>Date de naissance <input name="dateNaissance" type="date"></label>
+      <label>Sexe * <select name="sexe" required><option value="">—</option><option>Homme</option><option>Femme</option></select></label>
+      <label>Taille (cm) <input name="taille" inputmode="decimal"></label>
+      <label>Poids (kg) <input name="poids" inputmode="decimal"></label>
+      <label>Numéro de téléphone <input name="telephone" type="tel"></label>
+      <label>E-mail <input name="email" type="email"></label>
+      <label class="wide">Code Manip <input name="codeManip"></label>
+    </div>
+    <p id="formErr" class="error"></p>
+    <div class="actions">
+      <button type="button" id="cancelBtn">Annuler</button>
+      <button class="primary" id="saveBtn">Enregistrer</button>
+    </div>
+  </form>
+</dialog>
+
+<dialog id="pwDlg">
+  <form id="pwForm" method="dialog" autocomplete="off">
+    <h2 id="pwDlgTitle">Changer le mot de passe</h2>
+    <label id="oldPwRow">Mot de passe actuel
+      <span class="pwfield"><input type="password" id="oldPw" required><button type="button" class="eye" data-target="oldPw" aria-label="Afficher le mot de passe" title="Afficher / masquer">👁</button></span>
+    </label>
+    <label><span id="newPwLabel">Nouveau mot de passe (8 caractères min.)</span>
+      <span class="pwfield"><input type="password" id="newPw" required minlength="8"><button type="button" class="eye" data-target="newPw" aria-label="Afficher le mot de passe" title="Afficher / masquer">👁</button></span>
+    </label>
+    <p id="pwErr" class="error"></p>
+    <div class="actions">
+      <button type="button" id="pwCancel">Annuler</button>
+      <button class="primary" id="pwSubmitBtn">Changer</button>
+    </div>
+  </form>
+</dialog>
+
+<dialog id="auditDlg">
+  <h2>Journal des modifications</h2>
+  <p class="muted">Seuls l'ID et le type d'action sont enregistrés (aucune donnée personnelle).</p>
+  <div class="scroll"><table><thead><tr><th>Date</th><th>Action</th><th>ID</th><th>Détail</th></tr></thead><tbody id="auditRows"></tbody></table></div>
+  <div class="actions"><button id="auditClose">Fermer</button></div>
+</dialog>
+
+<dialog id="updateDialog">
+  <form method="dialog" style="display: grid; gap: 0.8rem;">
+    <h2 id="updateTitle">Mise à jour disponible</h2>
+    <div id="updateNotes" style="max-height: 200px; overflow-y: auto; margin-bottom: 1em; font-size: 0.9em; white-space: pre-wrap; word-break: break-word; background: var(--bg); padding: 0.8em; border-radius: 6px; border: 1px solid var(--line);"></div>
+    <div id="updateProgress" class="hidden" style="text-align: center; margin-bottom: 1em; padding: 1.2rem; background: #e8f1ff; border-radius: 6px; border: 1px solid #b6d0ff;">
+       <p id="updateStatusText" style="margin: 0 0 0.6rem 0; font-weight: 600;">⏳ Téléchargement en cours... (0%)</p>
+       <div style="background: #fff; border: 1px solid var(--line); border-radius: 10px; height: 12px; overflow: hidden; margin-bottom: 0.6rem;">
+         <div id="updateProgressBar" style="width: 0%; height: 100%; background: #0b8043; transition: width 0.25s ease;"></div>
+       </div>
+       <p class="warn" style="margin: 0; font-size: 0.85em;">Ne fermez pas cette fenêtre, l'opération prend quelques secondes.</p>
+    </div>
+    <div id="updateError" class="error hidden"></div>
+    <div class="row" id="updateActions">
+      <button type="button" class="primary" id="doUpdateBtn">Installer et redémarrer</button>
+      <button type="button" id="updateLaterBtn">Plus tard</button>
+    </div>
+  </form>
+</dialog>
+
+<script src="app.js"></script>
+</body>
+</html>

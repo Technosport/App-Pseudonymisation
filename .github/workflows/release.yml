@@ -1,0 +1,73 @@
+name: Release
+
+on:
+  push:
+    tags: ["v*"]
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    env:
+      CGO_ENABLED: "0"
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+      - run: go test ./...
+      - name: Build
+        env:
+          TELEMETRY_URL: ${{ secrets.TELEMETRY_URL }}
+          TELEMETRY_KEY: ${{ secrets.TELEMETRY_KEY }}
+          RECOVERY_KEY_PUB: ${{ secrets.RECOVERY_KEY_PUB }}
+        run: |
+          V="${GITHUB_REF_NAME}"
+          D="App-Pseudonymisation-TKS"
+          mkdir -p "$D"
+          LDF="-s -w -X main.version=${V} -X github.com/Technosport/Pseudonymisation/internal/telemetry.EndpointURL=${TELEMETRY_URL} -X github.com/Technosport/Pseudonymisation/internal/telemetry.EndpointKey=${TELEMETRY_KEY} -X github.com/Technosport/Pseudonymisation/internal/store.AdminPublicKeyHex=${RECOVERY_KEY_PUB}"
+          GOOS=windows GOARCH=amd64 go build -trimpath -ldflags "$LDF" -o "$D/App-Pseudonymisation-TKS.exe" .
+          GOOS=darwin  GOARCH=arm64 go build -trimpath -ldflags "$LDF" -o "$D/App-Pseudonymisation-TKS-mac-arm64" .
+          GOOS=darwin  GOARCH=amd64 go build -trimpath -ldflags "$LDF" -o "$D/App-Pseudonymisation-TKS-mac-intel" .
+          cp package/README.txt package/Lancer-Mac.command "$D/"
+          chmod +x "$D/App-Pseudonymisation-TKS-mac-arm64" "$D/App-Pseudonymisation-TKS-mac-intel" "$D/Lancer-Mac.command"
+          zip -r "App-Pseudonymisation-TKS-${V}.zip" "$D"
+      - name: Sign Release Archive
+        env:
+          SIGNING_KEY: ${{ secrets.RELEASE_SIGNING_KEY }}
+        run: |
+          V="${GITHUB_REF_NAME}"
+          if [ -n "$SIGNING_KEY" ]; then
+            go run ./cmd/signrelease -key "$SIGNING_KEY" -file "App-Pseudonymisation-TKS-${V}.zip"
+          fi
+      - name: Generate Release Notes
+        id: notes
+        run: |
+          V="${GITHUB_REF_NAME}"
+          TAG_MSG=$(git tag -l --format='%(contents)' "${V}")
+          echo "BODY<<EOF" >> $GITHUB_OUTPUT
+          if [ -n "$TAG_MSG" ]; then
+            echo "$TAG_MSG" >> $GITHUB_OUTPUT
+          else
+            PREV_TAG=$(git describe --tags --abbrev=0 "${V}^" 2>/dev/null || true)
+            echo "### Nouveautés et Améliorations" >> $GITHUB_OUTPUT
+            if [ -n "$PREV_TAG" ]; then
+              git log "${PREV_TAG}..${V}" --pretty=format:"* %s" --no-merges >> $GITHUB_OUTPUT
+            else
+              git log -n 10 --pretty=format:"* %s" --no-merges >> $GITHUB_OUTPUT
+            fi
+            echo "" >> $GITHUB_OUTPUT
+          fi
+          echo "EOF" >> $GITHUB_OUTPUT
+      - uses: softprops/action-gh-release@v2
+        with:
+          files: |
+            App-Pseudonymisation-TKS-*.zip
+            App-Pseudonymisation-TKS-*.zip.sig
+          body: ${{ steps.notes.outputs.BODY }}
+          generate_release_notes: false
+          fail_on_unmatched_files: false
