@@ -5,7 +5,6 @@
 [![Security](https://img.shields.io/badge/Chiffrement-AES--256--GCM-26A669?style=flat-square)](SECURITY.md)
 
 > **Application portable et chiffrée de bout en bout (Windows & macOS) pour enregistrer et pseudonymiser les participants lors des expérimentations, utilisable directement sur clé USB.**  
-> *Développée au sein du **Technosport / ISM** (UMR 7287 CNRS — Aix-Marseille Université) • [**Mode d'emploi**](package/README.txt) • [**Sécurité & RGPD**](SECURITY.md)*
 
 ---
 
